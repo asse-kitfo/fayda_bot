@@ -17,6 +17,7 @@ from app.generator import generate_id
 
 from app.back_ocr import process_back_ocr
 from app.back_generator import generate_back
+from app.utils import cleanup_old_dirs
 import time
 import asyncio
 
@@ -548,7 +549,13 @@ def main():
             handle_image
         )
     )
-
+    
+    app.job_queue.run_repeating(
+        lambda *_: cleanup_old_dirs(30),
+        interval=600,
+        first=600
+    )
+    
     print("🚀 Initializing OCR and segmentation models...")
     print("✅ Bot running...")
     
