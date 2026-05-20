@@ -1,0 +1,50 @@
+{
+  "ocr": {
+    "name_am":   { "x": 390, "y": 152, "w": 410, "h": 32, "bold": 1 },
+    "name_en":   { "x": 390, "y": 190, "w": 410, "h": 32, "bold": 1 },
+    "dob_greg":  { "x": 390, "y": 282, "w": 420, "h": 32, "bold": 1 },
+    "gender_am": { "x": 390, "y": 346, "w": 320, "h": 28, "bold": 1 },
+    "exp_greg":  { "x": 390, "y": 425, "w": 420, "h": 32, "bold": 1 }
+  },
+
+"face": {
+  "x": 13,
+  "y": 180,
+  "width": 395,
+  "height": 385,
+
+  "scale": 1.0,
+
+  "target_visible_height": 295
+},
+
+  "photo_copy": {
+  "width": 145,
+  "height": 145,
+
+  "margin_right": 100,
+  "margin_bottom": 105,
+
+  "offset_x": 3,
+  "offset_y": 65
+},
+  "issue_date": {
+  "greg": { "x": 10, "y": 520, "size": 21, "bold": 1.2,"anchor": "bottom" },
+  "eth":  { "x": 10, "y": 115, "size": 21, "bold": 1.2, "anchor": "top" }
+},
+"fan": {
+  "x": 460,
+  "y": 510,
+
+  "offset_x": 5,
+  "offset_y": 10,
+
+  "scale": 0.7,
+
+  "w": 320,
+  "h": 115,
+
+  "max_width": 420,
+  "max_height": 180
+}
+}

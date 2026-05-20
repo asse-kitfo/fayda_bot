@@ -1,0 +1,808 @@
+from PIL import Image, ImageDraw, ImageFont
+import cv2
+import os
+import json
+from rembg import remove, new_session
+from datetime import datetime, timedelta
+from PIL import (
+    Image,
+    ImageDraw,
+    ImageFont,
+    ImageStat,
+    ImageEnhance,
+    ImageFilter,
+    ImageOps
+)
+
+# =========================================================
+# GPU SESSION (ONNXRUNTIME GPU)
+# =========================================================
+session = new_session(
+    "u2net_human_seg",
+    providers=["CPUExecutionProvider"]
+)
+
+# =========================================================
+# MODEL WARMUP
+# prevents first-request freeze / timeout
+# =========================================================
+try:
+
+    print("🔥 Warming up U2NET model...")
+
+    warmup_img = Image.new("RGB", (512, 512), "white")
+
+    remove(
+        warmup_img,
+        session=session
+    )
+
+    print("✅ U2NET warmup completed")
+
+except Exception as e:
+
+    print("⚠️ Warmup failed:", e)
+    
+# =========================================================
+# PATH HELPERS
+# =========================================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def path(*args):
+    return os.path.join(BASE_DIR, "..", *args)
+
+
+# =========================================================
+# DATE HELPER
+# =========================================================
+def calculate_issue_date(date_str):
+
+    if not date_str:
+        return ""
+
+    try:
+        if any(c.isalpha() for c in date_str):
+            parts = date_str.split("/")
+            if len(parts) != 3:
+                return date_str
+
+            year, mon, day = parts
+            year = str(int(year) - 8)
+            day = str(int(day) + 2).zfill(2)
+
+            return f"{year}/{mon}/{day}"
+
+        else:
+            dt = datetime.strptime(date_str, "%Y/%m/%d")
+
+            try:
+                dt = dt.replace(year=dt.year - 8)
+            except ValueError:
+                dt = dt.replace(month=2, day=28, year=dt.year - 8)
+
+            dt += timedelta(days=2)
+
+            return dt.strftime("%Y/%m/%d")
+
+    except Exception as e:
+        print("⚠️ Date error:", e)
+        return date_str
+
+
+# =========================================================
+# VERTICAL TEXT
+# =========================================================
+def draw_vertical_text(base_img, text, cfg, font_path):
+
+    if not text:
+        return
+
+    font_size = cfg.get("size", 28)
+
+    x = int(cfg.get("x", 20))
+    y = int(cfg.get("y", 50))
+
+    anchor = cfg.get("anchor", "top")
+
+    font = ImageFont.truetype(
+        font_path,
+        font_size
+    )
+
+    bold = float(cfg.get("bold", 1))
+
+    offsets = [(0, 0)]
+
+    if bold >= 1.1:
+        offsets.append((0.3, 0))
+
+    if bold >= 1.2:
+        offsets.append((0.6, 0))
+
+    if bold >= 1.3:
+        offsets.append((0.9, 0))
+
+    if bold >= 1.5:
+        offsets.append((1, 0))
+
+    if bold >= 1.8:
+        offsets.append((0, 1))
+
+    if bold >= 2:
+        offsets.append((1, 1))
+
+    dummy = Image.new("RGBA", (1, 1))
+
+    d = ImageDraw.Draw(dummy)
+
+    bbox = d.textbbox(
+        (0, 0),
+        text,
+        font=font
+    )
+
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
+
+    pad = 20
+
+    txt_img = Image.new(
+        "RGBA",
+        (w + pad * 2, h + pad * 2),
+        (0, 0, 0, 0)
+    )
+
+    d = ImageDraw.Draw(txt_img)
+
+    for dx, dy in offsets:
+
+        d.text(
+            (pad + dx, pad + dy),
+            text,
+            font=font,
+            fill=(0, 0, 0)
+        )
+
+    rotated = txt_img.rotate(
+        90,
+        expand=True
+    )
+
+    rw, rh = rotated.size
+
+    if anchor == "top":
+        final_y = y
+
+    elif anchor == "center":
+        final_y = y - rh // 2
+
+    elif anchor == "bottom":
+        final_y = y - rh
+
+    else:
+        final_y = y
+
+    base_img.paste(
+        rotated,
+        (x, int(final_y)),
+        rotated
+    )
+
+# =========================================================
+# FACE EXTRACTION + VALIDATION
+# =========================================================
+def extract_face(image_path):
+
+    img = cv2.imread(image_path)
+
+    if img is None:
+        print("❌ Image not loaded")
+        return None
+
+    h, w = img.shape[:2]
+
+    # =====================================================
+    # FIXED REGION
+    # =====================================================
+    x1 = int(w * 0.20)
+    y1 = int(h * 0.18)
+
+    x2 = int(w * 0.80)
+    y2 = int(h * 0.46)
+
+    face_crop = img[y1:y2, x1:x2]
+
+    # =====================================================
+    # FACE DETECTION
+    # =====================================================
+    gray = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
+
+    detector = cv2.CascadeClassifier(
+        cv2.data.haarcascades +
+        "haarcascade_frontalface_default.xml"
+    )
+
+    faces = detector.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(80, 80)
+    )
+
+    # =====================================================
+    # NO FACE FOUND
+    # =====================================================
+    if len(faces) == 0:
+
+        print("❌ No face detected")
+
+        return None
+
+    # =====================================================
+    # USE LARGEST FACE
+    # =====================================================
+    largest = max(
+        faces,
+        key=lambda f: f[2] * f[3]
+    )
+
+    fx, fy, fw, fh = largest
+
+    # =====================================================
+    # ADD PADDING
+    # =====================================================
+    pad_x = int(fw * 0.35)
+    pad_y = int(fh * 0.45)
+
+    sx1 = max(0, fx - pad_x)
+    sy1 = max(0, fy - pad_y)
+
+    sx2 = min(face_crop.shape[1], fx + fw + pad_x)
+    sy2 = min(face_crop.shape[0], fy + fh + pad_y)
+
+    final_face = face_crop[sy1:sy2, sx1:sx2]
+
+    final_face = cv2.cvtColor(
+        final_face,
+        cv2.COLOR_BGR2RGB
+    )
+
+    return (
+        Image.fromarray(final_face).convert("RGBA"),
+        fw,
+        fh
+    )
+
+# =========================================================
+# BG REMOVAL (GPU ACCELERATED)
+# =========================================================
+def remove_background(image):
+
+    # =====================================================
+    # REMOVE BG USING GPU SESSION
+    # =====================================================
+    output = remove(
+        image,
+        session=session
+    )
+
+    output = output.convert("RGBA")
+
+    r, g, b, a = output.split()
+
+    # =====================================================
+    # CLEAN TRANSPARENCY
+    # =====================================================
+    alpha = a.point(
+        lambda p: 255 if p > 170 else 0
+    )
+
+    # =====================================================
+    # SLIGHT EDGE SMOOTHING
+    # =====================================================
+    alpha = alpha.filter(
+        ImageFilter.MedianFilter(size=3)
+    )
+
+    output.putalpha(alpha)
+
+    return output
+
+# =========================================================
+# TEXT HELPERS
+# =========================================================
+def draw_text_box(
+    draw,
+    text,
+    box,
+    font_path,
+    size,
+    spacing
+):
+
+    if not text:
+        return
+
+    font = ImageFont.truetype(font_path, size)
+
+    x, y, w, h = (
+        box["x"],
+        box["y"],
+        box["w"],
+        box["h"]
+    )
+
+    bold = float(box.get("bold", 1))
+
+    bbox = draw.textbbox(
+        (0, 0),
+        text,
+        font=font
+    )
+
+    tx = x + 5
+    ty = y + (h - (bbox[3] - bbox[1])) // 2
+
+    offsets = [(0, 0)]
+
+    if bold >= 1.1:
+        offsets.append((0.3, 0))
+
+    if bold >= 1.2:
+        offsets.append((0.6, 0))
+
+    if bold >= 1.3:
+        offsets.append((0.9, 0))
+
+    if bold >= 1.5:
+        offsets.append((1, 0))
+
+    if bold >= 1.8:
+        offsets.append((0, 1))
+
+    if bold >= 2:
+        offsets.append((1, 1))
+
+    for dx, dy in offsets:
+
+        draw.text(
+            (tx + dx, ty + dy),
+            text,
+            font=font,
+            fill=(0, 0, 0)
+        )
+
+
+def draw_mixed_text(
+    draw,
+    box,
+    left_text,
+    right_text,
+    font_left_path,
+    font_right_path,
+    size_left=28,
+    size_right=28
+):
+
+    if not left_text and not right_text:
+        return
+
+    x, y, w, h = (
+        box["x"],
+        box["y"],
+        box["w"],
+        box["h"]
+    )
+
+    font_left = ImageFont.truetype(
+        font_left_path,
+        size_left
+    )
+
+    font_right = ImageFont.truetype(
+        font_right_path,
+        size_right
+    )
+
+    sep = " | "
+
+    left_w = (
+        draw.textbbox(
+            (0, 0),
+            left_text,
+            font=font_left
+        )[2]
+        if left_text else 0
+    )
+
+    sep_w = draw.textbbox(
+        (0, 0),
+        sep,
+        font=font_right
+    )[2]
+
+    start_x = x + 5
+    center_y = y + h // 2 - 12
+
+    bold = float(box.get("bold", 1))
+
+    offsets = [(0, 0)]
+
+    if bold >= 1.1:
+        offsets.append((0.3, 0))
+
+    if bold >= 1.2:
+        offsets.append((0.6, 0))
+
+    if bold >= 1.3:
+        offsets.append((0.9, 0))
+
+    if bold >= 1.5:
+        offsets.append((1, 0))
+
+    if bold >= 1.8:
+        offsets.append((0, 1))
+
+    if bold >= 2:
+        offsets.append((1, 1))
+
+    for dx, dy in offsets:
+
+        if left_text:
+            draw.text(
+                (start_x + dx, center_y + dy),
+                left_text,
+                font=font_left,
+                fill=(0, 0, 0)
+            )
+
+        draw.text(
+            (start_x + left_w + dx, center_y + dy),
+            sep,
+            font=font_right,
+            fill=(0, 0, 0)
+        )
+
+        if right_text:
+            draw.text(
+                (
+                    start_x + left_w + sep_w + dx,
+                    center_y + dy
+                ),
+                right_text,
+                font=font_right,
+                fill=(0, 0, 0)
+            )
+
+
+# =========================================================
+# PHOTO COPY (CONSISTENT)
+# =========================================================
+def place_photo_copy(template, face, layout):
+
+    cfg = layout.get("photo_copy")
+
+    if not cfg or face is None:
+        return
+
+    canvas_w = cfg["width"]
+    canvas_h = cfg["height"]
+
+    margin_r = cfg.get("margin_right", 0)
+    margin_b = cfg.get("margin_bottom", 0)
+
+    offset_x = cfg.get("offset_x", 0)
+    offset_y = cfg.get("offset_y", 0)
+
+    # =====================================================
+    # REMOVE EMPTY TRANSPARENT SPACE
+    # =====================================================
+
+    alpha = face.getchannel("A")
+
+    bbox = alpha.getbbox()
+
+    if bbox:
+        face = face.crop(bbox)
+
+    fw, fh = face.size
+
+    # =====================================================
+    # CONSISTENT SCALE
+    # =====================================================
+
+    target_visible_height = int(canvas_h * 0.85)
+
+    scale = target_visible_height / fh
+
+    new_w = int(fw * scale)
+    new_h = int(fh * scale)
+
+    face = face.resize(
+        (new_w, new_h),
+        Image.LANCZOS
+    )
+
+    # =====================================================
+    # CREATE FIXED CANVAS
+    # =====================================================
+
+    photo_canvas = Image.new(
+        "RGBA",
+        (canvas_w, canvas_h),
+        (0, 0, 0, 0)
+    )
+
+    # =====================================================
+    # CENTER PERSON
+    # =====================================================
+
+    paste_x = (canvas_w - new_w) // 2
+    paste_y = canvas_h - new_h
+
+    photo_canvas.paste(
+        face,
+        (paste_x, paste_y),
+        face
+    )
+
+    # =====================================================
+    # PLACE ON TEMPLATE
+    # =====================================================
+
+    tx = (
+        template.width
+        - canvas_w
+        - margin_r
+        + offset_x
+    )
+
+    ty = (
+        template.height
+        - canvas_h
+        - margin_b
+        + offset_y
+    )
+
+    template.paste(
+        photo_canvas,
+        (int(tx), int(ty)),
+        photo_canvas
+    )
+
+# =========================================================
+# MAIN
+# =========================================================
+def generate_id(data, image_path, output_path, debug_dir="temp"):
+
+    template = Image.open(path("assets", "templates", "front.tif"))
+    draw = ImageDraw.Draw(template)
+
+    with open(path("config", "coords.json"), "r", encoding="utf-8") as f:
+        layout = json.load(f)
+
+    ocr = layout["ocr"]
+
+    font_en = path("assets", "fonts", "english.ttf")
+    font_am = path("assets", "fonts", "amharic.ttf")
+
+    dob = f"{data.get('dob_eth','')} | {data.get('dob_greg','')}"
+    exp = f"{data.get('exp_eth','')} | {data.get('exp_greg','')}"
+
+    issue_greg = calculate_issue_date(data.get("exp_greg",""))
+    issue_eth  = calculate_issue_date(data.get("exp_eth",""))
+
+    draw_text_box(draw, data.get("name_en",""), ocr["name_en"], font_en, 34, 2)
+    draw_text_box(draw, data.get("name_am",""), ocr["name_am"], font_am, 36, 1)
+    draw_text_box(draw, dob, ocr["dob_greg"], font_en, 32, 0)
+    draw_text_box(draw, exp, ocr["exp_greg"], font_en, 32, 0)
+
+    draw_mixed_text(
+        draw,
+        ocr["gender_am"],
+        data.get("gender_am",""),
+        data.get("gender_en",""),
+        font_am,
+        font_en,
+        36,
+        34
+    )
+
+    issue_cfg = layout.get("issue_date", {})
+
+    draw_vertical_text(template, issue_eth, issue_cfg.get("greg", {}), font_en)
+    draw_vertical_text(template, issue_greg, issue_cfg.get("eth", {}), font_en)
+
+    # =====================================================
+    # FAN IMAGE
+    # =====================================================
+    fan_img_path = os.path.join(
+        debug_dir,
+        "debug_fan_crop.jpg"
+    )
+
+    if os.path.exists(fan_img_path):
+
+        try:
+            crop_img = Image.open(fan_img_path).convert("RGBA")
+
+            fan_cfg = layout.get("fan", {})
+
+            x = fan_cfg.get("x", 460)
+            y = fan_cfg.get("y", 500)
+
+            offset_x = fan_cfg.get("offset_x", 0)
+            offset_y = fan_cfg.get("offset_y", 0)
+
+            scale = fan_cfg.get("scale", 1.0)
+
+            base_w = fan_cfg.get("w", crop_img.width)
+            base_h = fan_cfg.get("h", crop_img.height)
+
+            w = int(base_w * scale)
+            h = int(base_h * scale)
+
+            max_w = fan_cfg.get("max_width")
+            max_h = fan_cfg.get("max_height")
+
+            if max_w and w > max_w:
+                ratio = max_w / w
+                w = int(w * ratio)
+                h = int(h * ratio)
+
+            if max_h and h > max_h:
+                ratio = max_h / h
+                w = int(w * ratio)
+                h = int(h * ratio)
+
+            crop_img = crop_img.resize((w, h), Image.LANCZOS)
+
+            final_x = int(x + offset_x)
+            final_y = int(y + offset_y)
+
+            template.paste(crop_img, (final_x, final_y), crop_img)
+
+        except Exception as e:
+            print("⚠️ Failed to place cropped image:", e)
+
+    # =====================================================
+    # FACE
+    # =====================================================
+    result = extract_face(image_path)
+
+    # =====================================================
+    # FACE VALIDATION
+    # =====================================================
+    if not result:
+
+        print("❌ FACE NOT FOUND")
+
+        return None
+
+    face, detected_fw, detected_fh = result
+
+    face = remove_background(face)
+
+    r, g, b, a = face.split()
+
+    gray = Image.merge("RGB", (r, g, b)).convert("L")
+
+    stat = ImageStat.Stat(gray)
+
+    avg = stat.mean[0]
+
+    target = 145
+
+    factor = target / max(avg, 1)
+
+    factor = max(0.7, min(1.4, factor))
+
+    gray = ImageEnhance.Brightness(gray).enhance(factor)
+
+    face = Image.merge("RGBA", (gray, gray, gray, a))
+
+    f = layout["face"]
+
+    scale = f.get("scale", 1.0)
+
+    # =====================================================
+    # TRUE CONSISTENT SIZE SYSTEM
+    # =====================================================
+
+    fw, fh = face.size
+
+    alpha = face.getchannel("A")
+
+    bbox = alpha.getbbox()
+
+    if bbox:
+
+        bx1, by1, bx2, by2 = bbox
+
+        visible_w = bx2 - bx1
+        visible_h = by2 - by1
+
+        # ==========================================
+        # TARGET VISIBLE PERSON HEIGHT
+        # ==========================================
+        target_visible_height = f.get(
+            "target_visible_height",
+            300
+        )
+
+        scale_factor = (
+            target_visible_height / visible_h
+        )
+
+        scale_factor *= f.get("scale", 1.0)
+
+        new_w = int(fw * scale_factor)
+        new_h = int(fh * scale_factor)
+
+    else:
+
+        fit_scale = min(
+            f["width"] / fw,
+            f["height"] / fh
+        )
+
+        scale_factor = fit_scale
+
+        new_w = int(fw * scale_factor)
+        new_h = int(fh * scale_factor)
+
+    # =====================================================
+    # RESIZE
+    # =====================================================
+
+    face = face.resize(
+        (new_w, new_h),
+        Image.LANCZOS
+    )
+
+    # =====================================================
+    # CENTER INSIDE FACE BOX
+    # =====================================================
+
+    x_offset = int(
+        f["x"] + (f["width"] - new_w) / 2
+    )
+
+    y_offset = int(
+        f["y"] + (f["height"] - new_h) / 2
+    )
+
+    template.paste(face, (x_offset, y_offset), face)
+
+    place_photo_copy(template, face, layout)
+
+    # =====================================================
+    # SAVE
+    # =====================================================
+    name = data.get("name_en", "").strip()
+
+    if not name:
+        name = "unknown"
+
+    safe_name = "".join(
+        c for c in name
+        if c.isalnum() or c in (" ", "_")
+    ).strip()
+
+    filename = f"{safe_name} front.tif"
+
+    output_dir = os.path.dirname(output_path)
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    final_path = os.path.join(output_dir, filename)
+
+    template.save(
+        final_path,
+        format="TIFF",
+        compression="raw"
+    )
+
+    print("✅ ID Generated:", final_path)
+
+    return final_path
