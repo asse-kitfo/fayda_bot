@@ -775,6 +775,95 @@ def clean_line(x):
 
     return x
 
+def safe_woreda_sync(en_value, amh_value):
+    """
+    Ensures EN ↔ AMH consistency without breaking existing logic.
+    Only fixes missing counterpart.
+    """
+
+    en_value = en_value or ""
+    amh_value = amh_value or ""
+
+    en_low = en_value.strip().lower()
+    amh_low = amh_value.strip().lower()
+
+    woreda_map = {
+        "enor": "እኖር",
+        "እኖር": "enor",
+
+        "gunchere city administration": "ጉንችሬ ከተማ አስተዳደር",
+        "ጉንችሬ ከተማ አስተዳደር": "gunchere city administration",
+
+        "abeshge": "አበሽጌ",
+        "አበሽጌ": "abeshge",
+
+        "geta": "ጌታ",
+        "ጌታ": "geta",
+
+        "goro": "ጎሮ",
+        "ጎሮ": "goro",
+
+        "ener meger": "ኢነር መገር",
+        "ኢነር መገር": "ener meger",
+
+        "wolkite town administration":
+            "ወልቂጤ ከተማ አስተዳደር",
+        "ወልቂጤ ከተማ አስተዳደር":
+            "wolkite town administration",
+
+        "welkite city administration":
+            "ወልቂጤ ከተማ አስተዳደር",
+
+        "kombolcha city administration":
+            "ኮምቦልቻ ከተማ አስተዳደር",
+        "ኮምቦልቻ ከተማ አስተዳደር":
+            "kombolcha city administration",
+               
+        "emdibir city administration": 
+            "እምድብር ከተማ አስተዳደር",
+            
+        "እምድብር ከተማ አስተዳደር":
+            "emdibir city administration", 
+            
+        "arekit city administration": 
+            "አረቅጥ ከተማ አስተዳደር",
+        
+        "አረቅጥ ከተማ አስተዳደር": 
+            "arekit city administration",
+        
+        "agena city administration": 
+            "አገና ከተማ አስተዳደር",
+        "አገና ከተማ አስተዳደር": 
+            "agena city administration",
+            
+        "cheha": "ቸሀ",
+        "ቸሀ": "cheha",
+        
+        "mohrna aklil": "ሞህርና አክሊል",
+        "ሞህርና አክሊል": "mohrna aklil",
+       
+        "ezja": "ኧዣ",
+        "ኧዣ": "ezja",
+        
+        "geta": "ጌታ",
+        "ጌታ": "geta",
+        
+        "gumer": "ጉመር",
+        "ጉመር": "gumer",
+        
+        "endegagn": "እንደጋኝ",
+        "እንደጋኝ": "endegagn",
+    }
+
+    # CASE 1: EN exists → fill AMH
+    if en_low in woreda_map and not amh_value:
+        return en_value, woreda_map[en_low]
+
+    # CASE 2: AMH exists → fill EN
+    if amh_low in woreda_map and not en_value:
+        return woreda_map[amh_low], amh_value
+
+    return en_value, amh_value
 # =========================================================
 # PARSE BACK DATA
 # =========================================================
@@ -1080,8 +1169,13 @@ def parse_back(text):
     }
 
     z = data["zone"].lower()
-    w = data["woreda"].lower()
+    w = data["woreda"].lowerw = (data["woreda"] or "").lower()()
 
+    # SAFE EN ↔ AMH SYNC FIX (NEW PATCH)
+    data["woreda"], data["woreda_amh"] = safe_woreda_sync(
+        data.get("woreda", ""),
+        data.get("woreda_amh", "")
+    )
     if z in zone_map:
         data["zone"] = zone_map[z]
 
