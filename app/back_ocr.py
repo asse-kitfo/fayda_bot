@@ -1169,7 +1169,7 @@ def parse_back(text):
     }
 
     z = data["zone"].lower()
-    w = data["woreda"].lowerw = (data["woreda"] or "").lower()()
+    w = (data["woreda"] or "").lower()
 
     # SAFE EN ↔ AMH SYNC FIX (NEW PATCH)
     data["woreda"], data["woreda_amh"] = safe_woreda_sync(
