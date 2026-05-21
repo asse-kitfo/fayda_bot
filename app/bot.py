@@ -21,8 +21,11 @@ from app.utils import cleanup_old_dirs
 import time
 import asyncio
 
-asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
+if os.name == "nt":
+    asyncio.set_event_loop_policy(
+        asyncio.WindowsSelectorEventLoopPolicy()
+    )
+    
 load_dotenv()
 user_sessions = {}
 processing_users = set()
