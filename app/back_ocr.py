@@ -1,3 +1,4 @@
+import os
 import cv2
 import pytesseract
 import re
@@ -532,16 +533,6 @@ def extract_phone(card_img, ocr_data):
     x1 = max(0, min(w - 1, x1))
     x2 = max(0, min(w, x2))
 
-
-    # =========================================
-    # CLAMP
-    # =========================================
-    y1 = max(0, min(h - 1, y1))
-    y2 = max(0, min(h, y2))
-
-    x1 = max(0, min(w - 1, x1))
-    x2 = max(0, min(w, x2))
-
     crop = card_img[y1:y2, x1:x2]
     
     # remove noisy borders
@@ -745,7 +736,7 @@ def extract_woreda(card_img, ocr_data):
         (
             "--oem 3 "
             "--psm 7 "
-            "-c tessedit_char_whitelist=0123456789"
+            "-l eng+amh"
         )
     )
 
@@ -778,95 +769,6 @@ def clean_line(x):
 
     return x
 
-def safe_woreda_sync(en_value, amh_value):
-    """
-    Ensures EN ↔ AMH consistency without breaking existing logic.
-    Only fixes missing counterpart.
-    """
-
-    en_value = en_value or ""
-    amh_value = amh_value or ""
-
-    en_low = en_value.strip().lower()
-    amh_low = amh_value.strip().lower()
-
-    woreda_map = {
-        "enor": "እኖር",
-        "እኖር": "enor",
-
-        "gunchere city administration": "ጉንችሬ ከተማ አስተዳደር",
-        "ጉንችሬ ከተማ አስተዳደር": "gunchere city administration",
-
-        "abeshge": "አበሽጌ",
-        "አበሽጌ": "abeshge",
-
-        "geta": "ጌታ",
-        "ጌታ": "geta",
-
-        "goro": "ጎሮ",
-        "ጎሮ": "goro",
-
-        "ener meger": "ኢነር መገር",
-        "ኢነር መገር": "ener meger",
-
-        "wolkite town administration":
-            "ወልቂጤ ከተማ አስተዳደር",
-        "ወልቂጤ ከተማ አስተዳደር":
-            "wolkite town administration",
-
-        "welkite city administration":
-            "ወልቂጤ ከተማ አስተዳደር",
-
-        "kombolcha city administration":
-            "ኮምቦልቻ ከተማ አስተዳደር",
-        "ኮምቦልቻ ከተማ አስተዳደር":
-            "kombolcha city administration",
-               
-        "emdibir city administration": 
-            "እምድብር ከተማ አስተዳደር",
-            
-        "እምድብር ከተማ አስተዳደር":
-            "emdibir city administration", 
-            
-        "arekit city administration": 
-            "አረቅጥ ከተማ አስተዳደር",
-        
-        "አረቅጥ ከተማ አስተዳደር": 
-            "arekit city administration",
-        
-        "agena city administration": 
-            "አገና ከተማ አስተዳደር",
-        "አገና ከተማ አስተዳደር": 
-            "agena city administration",
-            
-        "cheha": "ቸሀ",
-        "ቸሀ": "cheha",
-        
-        "mohrna aklil": "ሞህርና አክሊል",
-        "ሞህርና አክሊል": "mohrna aklil",
-       
-        "ezja": "ኧዣ",
-        "ኧዣ": "ezja",
-        
-        "geta": "ጌታ",
-        "ጌታ": "geta",
-        
-        "gumer": "ጉመር",
-        "ጉመር": "gumer",
-        
-        "endegagn": "እንደጋኝ",
-        "እንደጋኝ": "endegagn",
-    }
-
-    # CASE 1: EN exists → fill AMH
-    if en_low in woreda_map and not amh_value:
-        return en_value, woreda_map[en_low]
-
-    # CASE 2: AMH exists → fill EN
-    if amh_low in woreda_map and not en_value:
-        return woreda_map[amh_low], amh_value
-
-    return en_value, amh_value
 # =========================================================
 # PARSE BACK DATA
 # =========================================================
@@ -1034,8 +936,12 @@ def parse_back(text):
                     data["woreda"] = line.strip()
 
                 # fallback only if woreda still empty
-                elif not data["woreda"]:
-                    data["woreda"] = line.strip()
+                elif (
+                    not data["woreda"]
+                    and "zone" not in low
+                    and "region" not in low
+                ):
+                     data["woreda"] = line.strip()
                     
    # =====================================================
     # FIX KNOWN VALUES
@@ -1062,128 +968,57 @@ def parse_back(text):
             "አዲስ ከተማ",
         "lemi kura": 
             "ለሚ ኩራ",
-        "nifas silk lafto": 
-            "ንፋስ ስልክ ላፍቶ",
-        "ቦሌ":
-         "bole", 
-        "የካ":
-          "yeka", 
-        "አራዳ":
-           "arada", 
-        "ልደታ":
-         "lideta", 
-        "ቂርቆስ":
-          "kirkos", 
-        "አቃቂ ቃሊቲ":
-          "akaki kaliti", 
-        "ጉለሌ":
-          "gulele", 
-        "ንፋስ ስልክ ላፍቶ":
-         "nifas silk lafto", 
-        "አዲስ ከተማ":
-         "addis ketema", 
-        "ለሚ ኩራ":
-         "lemi kura", 
-        "ንፋስ ስልክ ላፍቶ":
-          "nifas silk lafto", 
-    }
+        }
 
-    woreda_map = {
-        "enor": "Enor"
-    }
-
-    woreda_amh_map = {
-        "enor":
-            "እኖር",
-        "እኖር":
-            "enor",
-
-        "gunchere city administration":
-            "ጉንችሬ ከተማ አስተዳደር",
-        "ጉንችሬ ከተማ አስተዳደር":
-            "gunchere city administration",
-
-        "wolkite town administration":
-            "ወልቂጤ ከተማ አስተዳደር",
-        "ወልቂጤ ከተማ አስተዳደር":
-            "wolkite town administration",
-
-        "welkite city administration":
-            "ወልቂጤ ከተማ አስተዳደር",
-
-        "abeshge":
-            "አበሽጌ",
-        "አበሽጌ":
-            "abeshge",
-
-        "kombolcha city administration":
-            "ኮምቦልቻ ከተማ አስተዳደር",
-        "ኮምቦልቻ ከተማ አስተዳደር":
-            "kombolcha city administration",
-        
-        "geta":
-            "ጌታ",
-        "ጌታ":
-        "   geta",
+    woreda_to_amh = {
+        "enor": "እኖር",
+        "gunchere city administration": "ጉንችሬ ከተማ አስተዳደር",
+        "abeshge": "አበሽጌ",
         "goro": "ጎሮ",
-        "ጎሮ": "goro",
-        
-        "emdibir city administration": 
-            "እምድብር ከተማ አስተዳደር",
-            
-        "እምድብር ከተማ አስተዳደር":
-            "emdibir city administration", 
-            
-        "arekit city administration": 
-            "አረቅጥ ከተማ አስተዳደር",
-        
-        "አረቅጥ ከተማ አስተዳደር": 
-            "arekit city administration",
-        
-        "agena city administration": 
-            "አገና ከተማ አስተዳደር",
-        "አገና ከተማ አስተዳደር": 
-            "agena city administration",
-            
-        "cheha": "ቸሀ",
-        "ቸሀ": "cheha",
-        
-        "mohrna aklil": "ሞህርና አክሊል",
-        "ሞህርና አክሊል": "mohrna aklil",
-       
-        "ezja": "ኧዣ",
-        "ኧዣ": "ezja",
-        
-        "geta": "ጌታ",
-        "ጌታ": "geta",
-        
-        "gumer": "ጉመር",
-        "ጉመር": "gumer",
-        
-        "endegagn": "እንደጋኝ",
-        "እንደጋኝ": "endegagn",
-        
         "ener meger": "ኢነር መገር",
-        "ኢነር መገር": "ener meger"
-        
-        
-        
-        
+        "wolkite town administration": "ወልቂጤ ከተማ አስተዳደር",
+        "welkite city administration": "ወልቂጤ ከተማ አስተዳደር",
+        "kombolcha city administration": "ኮምቦልቻ ከተማ አስተዳደር",
+        "emdibir city administration": "እምድብር ከተማ አስተዳደር",
+        "arekit city administration": "አረቅጥ ከተማ አስተዳደር",
+        "agena city administration": "አገና ከተማ አስተዳደር",
+        "cheha": "ቸሀ",
+        "mohrna aklil": "ሞህርና አክሊል",
+        "ezja": "ኧዣ",
+        "geta": "ጌታ",
+        "gumer": "ጉመር",
+        "endegagn": "እንደጋኝ",
+    }
+
+    woreda_to_eng = {
+        "እኖር": "enor",
+        "ጉንችሬ ከተማ አስተዳደር": "gunchere city administration",
+        "አበሽጌ": "abeshge",
+        "ጎሮ": "goro",
+        "ኢነር መገር": "ener meger",
+        "ወልቂጤ ከተማ አስተዳደር": "wolkite town administration",
+        "ኮምቦልቻ ከተማ አስተዳደር": "kombolcha city administration",
+        "እምድብር ከተማ አስተዳደር": "emdibir city administration",
+        "አረቅጥ ከተማ አስተዳደር": "arekit city administration",
+        "አገና ከተማ አስተዳደር": "agena city administration",
+        "ቸሀ": "cheha",
+        "ሞህርና አክሊል": "mohrna aklil",
+        "ኧዣ": "ezja",
+        "ጌታ": "geta",
+        "ጉመር": "gumer",
+        "እንደጋኝ": "endegagn",
     }
 
     z = data["zone"].lower()
     w = (data["woreda"] or "").lower()
 
-    # SAFE EN ↔ AMH SYNC FIX (NEW PATCH)
-    data["woreda"], data["woreda_amh"] = safe_woreda_sync(
-        data.get("woreda", ""),
-        data.get("woreda_amh", "")
-    )
     if z in zone_map:
         data["zone"] = zone_map[z]
 
-    if w in woreda_map:
-        data["woreda"] = woreda_map[w]
+    if w in woreda_to_amh:
+        data["woreda_amh"] = woreda_to_amh[w]
+    if w in woreda_to_eng:
+        data["woreda"] = woreda_to_eng[w]
             
     # =====================================================
     # DYNAMIC WOREDA NUMBER
@@ -1213,14 +1048,6 @@ def parse_back(text):
         "addis ababa":
             "አዲስ አበባ",
             
-        "ማዕከላዊ ኢትዮጵያ ክልል":
-            "central ethiopia region",
-
-        "አማራ":
-            "amhara",
-
-        "አዲስ አበባ":
-            "addis ababa",
     }
    
     zone_amh_map = {
@@ -1239,15 +1066,6 @@ def parse_back(text):
         "bole":
             "ቦሌ",
 
-        "yeka":
-            "የካ",
-
-        "arada":
-            "አራዳ",
-
-        "lideta":
-            "ልደታ",
-
         "kirkos":
             "ቂርቆስ",
 
@@ -1265,49 +1083,12 @@ def parse_back(text):
 
         "lemi kura":
             "ለሚ ኩራ",
-                "bole": 
-            "ቦሌ",
         "yeka": 
             "የካ",
         "arada": 
             "አራዳ",
         "lideta": 
             "ልደታ",
-        "kirkos": 
-            "ቂርቆስ",
-        "akaki kaliti": 
-            "አቃቂ ቃሊቲ",
-        "gulele": "ጉለሌ",
-        "nifas silk lafto": 
-            "ንፋስ ስልክ ላፍቶ",
-        "addis ketema": 
-            "አዲስ ከተማ",
-        "lemi kura": 
-            "ለሚ ኩራ",
-        "nifas silk lafto": 
-            "ንፋስ ስልክ ላፍቶ",
-        "ቦሌ":
-         "bole", 
-        "የካ":
-          "yeka", 
-        "አራዳ":
-           "arada", 
-        "ልደታ":
-         "lideta", 
-        "ቂርቆስ":
-          "kirkos", 
-        "አቃቂ ቃሊቲ":
-          "akaki kaliti", 
-        "ጉለሌ":
-          "gulele", 
-        "ንፋስ ስልክ ላፍቶ":
-         "nifas silk lafto", 
-        "አዲስ ከተማ":
-         "addis ketema", 
-        "ለሚ ኩራ":
-         "lemi kura", 
-        "ንፋስ ስልክ ላፍቶ":
-          "nifas silk lafto", 
     }
 
 
@@ -1322,12 +1103,6 @@ def parse_back(text):
 
     if z in zone_amh_map:
         data["zone_amh"] = zone_amh_map[z]
-
-    # woreda
-    w = data["woreda"].lower()
-
-    if w in woreda_amh_map:
-        data["woreda_amh"] = woreda_amh_map[w]
 
     # =====================================================
     # DEBUG
@@ -1456,7 +1231,6 @@ def process_back_ocr(image_path, confirm=True):
         "welkite city administration": "ወልቂጤ ከተማ አስተዳደር",
         "kombolcha city administration":
         "ኮምቦልቻ ከተማ አስተዳደር",
-        "geta": "ጌታ",
         "goro": "ጎሮ",
         "emdibir city administration": "እምድብር ከተማ አስተዳደር",
         "arekit city administration": "አረቅጥ ከተማ አስተዳደር",
