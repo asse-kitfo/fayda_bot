@@ -34,7 +34,7 @@ def get_nationality_anchor(card_img, ocr_data):
     # =========================================
     for i, word in enumerate(ocr_data["text"]):
 
-        word = word.strip().lower()
+        word = str(word).strip().lower()
 
         if "ethiopian" in word:
 
@@ -231,7 +231,7 @@ def get_ocr_data(card_img):
 
     data = pytesseract.image_to_data(
         card_img,
-        config="--oem 3 --psm 6",
+        config="--oem 3 --psm 6 -l eng+amh",
         output_type=pytesseract.Output.DICT
     )
 
@@ -759,6 +759,9 @@ def extract_woreda(card_img, ocr_data):
     
     text = re.sub(r"\s+", " ", text)
 
+    # normalize OCR confusion between scripts
+    text = text.replace("0", "o")
+    text = text.replace("1", "l")
     print("\n🔍 WOREDA CLEANED:\n")
     print(text)
 
