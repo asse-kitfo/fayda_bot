@@ -85,7 +85,7 @@ def has_invalid_amharic_chars(text):
     return bool(
         re.search(r"[^\u1200-\u137F ]", text)
     )
-
+    
 # =========================================================
 # VALIDATORS (UNCHANGED)
 # =========================================================
@@ -96,7 +96,6 @@ def is_valid_english_name(text):
 
     # =========================================
     # REJECT SPECIAL CHARACTERS / NUMBERS
-    # only English letters + spaces allowed
     # =========================================
     if re.search(r"[^A-Za-z ]", text):
         return False
@@ -120,34 +119,27 @@ def is_valid_english_name(text):
 
     words_upper = text.upper().split()
 
-    # reject forbidden words
     if any(b == w for w in words_upper for b in bad_words):
         return False
 
     words = text.split()
 
-    # =========================================
     # MUST BE EXACTLY 3 WORDS
-    # =========================================
     if len(words) != 3:
         return False
 
-    # each word must be at least 2 chars
+    # each word minimum length
     if not all(len(w) >= 2 for w in words):
         return False
 
     return True
-
 
 def is_valid_amharic_name(text):
 
     if not text:
         return False
 
-    # =========================================
-    # REJECT SPECIAL CHARACTERS / NUMBERS
-    # allow only Amharic fidels + spaces
-    # =========================================
+    # allow only Amharic chars + spaces
     if re.search(r"[^\u1200-\u137F ]", text):
         return False
 
@@ -158,18 +150,14 @@ def is_valid_amharic_name(text):
 
     words = text.split()
 
-    # =========================================
     # MUST BE EXACTLY 3 WORDS
-    # =========================================
     if len(words) != 3:
         return False
 
-    # each word must be at least 2 chars
     if not all(len(w) >= 2 for w in words):
         return False
 
     return True
-
 
 def is_amharic(text):
     return bool(re.search(r"[\u1200-\u137F]", text or ""))
@@ -384,7 +372,7 @@ def extract_fan(text, image_path=None, debug_dir="temp"):
     # DEBUG
     fan_debug_path = os.path.join(debug_dir, "debug_fan_crop.jpg")
     cv2.imwrite(fan_debug_path, crop)
-
+    
     print(f"\n📦 CROP: y1={y1}, y2={y2}, exp_y={exp_y}")
 
     # =========================================
@@ -413,8 +401,6 @@ def extract_fan(text, image_path=None, debug_dir="temp"):
             return m, crop
 
     return "", crop
-
-
 # =========================================================
 # SIMPLE NAME CROP (RELATIVE TO DOB/EXP)
 # =========================================================
@@ -618,6 +604,7 @@ def extract_names_from_crop(image_path, debug_dir="temp"):
             break
 
     return name_en, name_am, crop
+
 # =========================================================
 # PARSER (UNCHANGED)
 # =========================================================
@@ -815,6 +802,7 @@ def confirm_dates(data):
         "message": "",
         "issues": []
     }
+    
 # =========================================================
 # AMHARIC OCR FIXES
 # =========================================================
@@ -893,7 +881,7 @@ def fix_amharic_from_english(name_en, name_am):
 # MAIN (UNCHANGED)
 # =========================================================
 def process_ocr(image_path, confirm=True, debug_dir="temp"):
-
+    os.makedirs(debug_dir, exist_ok=True)
     img = preprocess(image_path)
     text = get_text(img)
 
@@ -901,7 +889,7 @@ def process_ocr(image_path, confirm=True, debug_dir="temp"):
         name_en, gender_en, dob_greg, exp_greg,
         name_am, gender_am, dob_eth, exp_eth
     ) = parse_text(text)
-
+    
     # =========================================
     # NAME CROP OCR
     # =========================================
@@ -917,13 +905,12 @@ def process_ocr(image_path, confirm=True, debug_dir="temp"):
 
     if crop_name_am:
         name_am = crop_name_am
+
     # =========================================
     # FIX AMHARIC OCR USING ENGLISH
     # =========================================
     name_am = fix_amharic_from_english(name_en, name_am)
-    # =========================================
-    # FAN OCR
-    # =========================================
+
     fan, fan_crop = extract_fan(
         text,
         image_path,
@@ -964,6 +951,7 @@ def process_ocr(image_path, confirm=True, debug_dir="temp"):
     )
 
     data["problems"] = problems
+
 
     print("\n✅ FINAL EXTRACTED DATA:")
     for k, v in data.items():
