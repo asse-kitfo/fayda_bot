@@ -35,7 +35,7 @@ def get_nationality_anchor(card_img, ocr_data):
     # =========================================
     for i, word in enumerate(ocr_data["text"]):
 
-        word = str(word).strip().lower()
+        word = word.strip().lower()
 
         if "ethiopian" in word:
 
@@ -141,6 +141,30 @@ def run_ocr_variants(
     )
 
     variants.append(adaptive)
+    # median blur
+    median = cv2.medianBlur(gray, 3)
+    variants.append(median)
+
+    # morphology close
+    kernel = np.ones((2, 2), np.uint8)
+
+    morph = cv2.morphologyEx(
+        gray,
+        cv2.MORPH_CLOSE,
+        kernel
+    )
+
+    variants.append(morph)
+
+    # stronger threshold
+    _, strong = cv2.threshold(
+        gray,
+        180,
+        255,
+        cv2.THRESH_BINARY
+    )
+
+    variants.append(strong)
 
     results = []
 
@@ -232,7 +256,7 @@ def get_ocr_data(card_img):
 
     data = pytesseract.image_to_data(
         card_img,
-        config="--oem 3 --psm 6 -l eng+amh",
+        config="--oem 3 --psm 6",
         output_type=pytesseract.Output.DICT
     )
 
@@ -722,6 +746,13 @@ def extract_woreda(card_img, ocr_data):
         255,
         cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
+    kernel = np.ones((2, 2), np.uint8)
+
+    gray = cv2.morphologyEx(
+        gray,
+        cv2.MORPH_CLOSE,
+        kernel
+    )
 
     cv2.imwrite(
         "debug_woreda_processed.jpg",
@@ -735,8 +766,8 @@ def extract_woreda(card_img, ocr_data):
         gray,
         (
             "--oem 3 "
-            "--psm 7 "
-            "-l eng+amh"
+            "--psm 6 "
+            "-l amh+eng"
         )
     )
 
@@ -750,9 +781,6 @@ def extract_woreda(card_img, ocr_data):
     
     text = re.sub(r"\s+", " ", text)
 
-    # normalize OCR confusion between scripts
-    text = text.replace("0", "o")
-    text = text.replace("1", "l")
     print("\n🔍 WOREDA CLEANED:\n")
     print(text)
 
@@ -936,12 +964,8 @@ def parse_back(text):
                     data["woreda"] = line.strip()
 
                 # fallback only if woreda still empty
-                elif (
-                    not data["woreda"]
-                    and "zone" not in low
-                    and "region" not in low
-                ):
-                     data["woreda"] = line.strip()
+                elif not data["woreda"]:
+                    data["woreda"] = line.strip()
                     
    # =====================================================
     # FIX KNOWN VALUES
@@ -968,57 +992,99 @@ def parse_back(text):
             "አዲስ ከተማ",
         "lemi kura": 
             "ለሚ ኩራ",
-        }
-
-    woreda_to_amh = {
-        "enor": "እኖር",
-        "gunchere city administration": "ጉንችሬ ከተማ አስተዳደር",
-        "abeshge": "አበሽጌ",
-        "goro": "ጎሮ",
-        "ener meger": "ኢነር መገር",
-        "wolkite town administration": "ወልቂጤ ከተማ አስተዳደር",
-        "welkite city administration": "ወልቂጤ ከተማ አስተዳደር",
-        "kombolcha city administration": "ኮምቦልቻ ከተማ አስተዳደር",
-        "emdibir city administration": "እምድብር ከተማ አስተዳደር",
-        "arekit city administration": "አረቅጥ ከተማ አስተዳደር",
-        "agena city administration": "አገና ከተማ አስተዳደር",
-        "cheha": "ቸሀ",
-        "mohrna aklil": "ሞህርና አክሊል",
-        "ezja": "ኧዣ",
-        "geta": "ጌታ",
-        "gumer": "ጉመር",
-        "endegagn": "እንደጋኝ",
+        "nifas silk lafto": 
+            "ንፋስ ስልክ ላፍቶ",
+        
     }
 
-    woreda_to_eng = {
-        "እኖር": "enor",
-        "ጉንችሬ ከተማ አስተዳደር": "gunchere city administration",
-        "አበሽጌ": "abeshge",
+    woreda_map = {
+        "enor": "Enor"
+    }
+
+    woreda_amh_map = {
+        "enor":
+            "እኖር",
+        "እኖር":
+            "enor",
+
+        "gunchere city administration":
+            "ጉንችሬ ከተማ አስተዳደር",
+        "ጉንችሬ ከተማ አስተዳደር":
+            "gunchere city administration",
+
+        "wolkite town administration":
+            "ወልቂጤ ከተማ አስተዳደር",
+        "ወልቂጤ ከተማ አስተዳደር":
+            "wolkite town administration",
+
+        "welkite city administration":
+            "ወልቂጤ ከተማ አስተዳደር",
+
+        "abeshge":
+            "አበሽጌ",
+        "አበሽጌ":
+            "abeshge",
+
+        "kombolcha city administration":
+            "ኮምቦልቻ ከተማ አስተዳደር",
+        "ኮምቦልቻ ከተማ አስተዳደር":
+            "kombolcha city administration",
+        
+        "geta": "ጌታ",
+        "goro": "ጎሮ",
         "ጎሮ": "goro",
-        "ኢነር መገር": "ener meger",
-        "ወልቂጤ ከተማ አስተዳደር": "wolkite town administration",
-        "ኮምቦልቻ ከተማ አስተዳደር": "kombolcha city administration",
-        "እምድብር ከተማ አስተዳደር": "emdibir city administration",
-        "አረቅጥ ከተማ አስተዳደር": "arekit city administration",
-        "አገና ከተማ አስተዳደር": "agena city administration",
+        
+        "emdibir city administration": 
+            "እምድብር ከተማ አስተዳደር",
+            
+        "እምድብር ከተማ አስተዳደር":
+            "emdibir city administration", 
+            
+        "arekit city administration": 
+            "አረቅጥ ከተማ አስተዳደር",
+        
+        "አረቅጥ ከተማ አስተዳደር": 
+            "arekit city administration",
+        
+        "agena city administration": 
+            "አገና ከተማ አስተዳደር",
+        "አገና ከተማ አስተዳደር": 
+            "agena city administration",
+            
+        "cheha": "ቸሀ",
         "ቸሀ": "cheha",
+        
+        "mohrna aklil": "ሞህርና አክሊል",
         "ሞህርና አክሊል": "mohrna aklil",
+       
+        "ezja": "ኧዣ",
         "ኧዣ": "ezja",
+        
+        "geta": "ጌታ",
         "ጌታ": "geta",
+        
+        "gumer": "ጉመር",
         "ጉመር": "gumer",
+        
+        "endegagn": "እንደጋኝ",
         "እንደጋኝ": "endegagn",
+        
+        "ener meger": "ኢነር መገር",
+        "ኢነር መገር": "ener meger"
+        
+        
+        
+        
     }
 
     z = data["zone"].lower()
-    w = (data["woreda"] or "").lower()
+    w = data["woreda"].lower()
 
     if z in zone_map:
         data["zone"] = zone_map[z]
 
-    if w in woreda_to_amh:
-        data["woreda_amh"] = woreda_to_amh[w]
-    if w in woreda_to_eng:
-        data["woreda"] = woreda_to_eng[w]
+    if w in woreda_map:
+        data["woreda"] = woreda_map[w]
             
     # =====================================================
     # DYNAMIC WOREDA NUMBER
@@ -1048,6 +1114,14 @@ def parse_back(text):
         "addis ababa":
             "አዲስ አበባ",
             
+        "ማዕከላዊ ኢትዮጵያ ክልል":
+            "central ethiopia region",
+
+        "አማራ":
+            "amhara",
+
+        "አዲስ አበባ":
+            "addis ababa",
     }
    
     zone_amh_map = {
@@ -1066,6 +1140,15 @@ def parse_back(text):
         "bole":
             "ቦሌ",
 
+        "yeka":
+            "የካ",
+
+        "arada":
+            "አራዳ",
+
+        "lideta":
+            "ልደታ",
+
         "kirkos":
             "ቂርቆስ",
 
@@ -1083,13 +1166,29 @@ def parse_back(text):
 
         "lemi kura":
             "ለሚ ኩራ",
+                "bole": 
+            "ቦሌ",
         "yeka": 
             "የካ",
         "arada": 
             "አራዳ",
         "lideta": 
             "ልደታ",
-    }
+        "kirkos": 
+            "ቂርቆስ",
+        "akaki kaliti": 
+            "አቃቂ ቃሊቲ",
+        "gulele": "ጉለሌ",
+        "nifas silk lafto": 
+            "ንፋስ ስልክ ላፍቶ",
+        "addis ketema": 
+            "አዲስ ከተማ",
+        "lemi kura": 
+            "ለሚ ኩራ",
+        "nifas silk lafto": 
+            "ንፋስ ስልክ ላፍቶ",
+        
+        }
 
 
     # region
@@ -1103,6 +1202,12 @@ def parse_back(text):
 
     if z in zone_amh_map:
         data["zone_amh"] = zone_amh_map[z]
+
+    # woreda
+    w = data["woreda"].lower()
+
+    if w in woreda_amh_map:
+        data["woreda_amh"] = woreda_amh_map[w]
 
     # =====================================================
     # DEBUG
@@ -1231,6 +1336,7 @@ def process_back_ocr(image_path, confirm=True):
         "welkite city administration": "ወልቂጤ ከተማ አስተዳደር",
         "kombolcha city administration":
         "ኮምቦልቻ ከተማ አስተዳደር",
+        "geta": "ጌታ",
         "goro": "ጎሮ",
         "emdibir city administration": "እምድብር ከተማ አስተዳደር",
         "arekit city administration": "አረቅጥ ከተማ አስተዳደር",
