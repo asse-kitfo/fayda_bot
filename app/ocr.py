@@ -1,4 +1,3 @@
-
 import cv2
 import pytesseract
 import re
@@ -61,6 +60,31 @@ def clean_amharic(text):
 
     return text.strip()
 
+# =========================================================
+# RAW CHARACTER FILTERS
+# reject names containing numbers/special chars
+# BEFORE cleaning
+# =========================================================
+def has_invalid_english_chars(text):
+
+    if not text:
+        return True
+
+    # allow only letters + spaces
+    return bool(
+        re.search(r"[^A-Za-z ]", text)
+    )
+
+
+def has_invalid_amharic_chars(text):
+
+    if not text:
+        return True
+
+    # allow only Amharic chars + spaces
+    return bool(
+        re.search(r"[^\u1200-\u137F ]", text)
+    )
 
 # =========================================================
 # VALIDATORS (UNCHANGED)
@@ -259,10 +283,13 @@ def extract_names(lines, anchor_i):
         if is_amharic(line):
             continue
 
+        # reject raw OCR line if contains symbols/numbers
+        if has_invalid_english_chars(line):
+            continue
+
         cleaned_en = clean_english(line)
 
         if is_valid_english_name(cleaned_en) and not cleaned_en.isupper():
-
             name_en = cleaned_en
 
             for j in range(i - 1, -1, -1):
@@ -270,6 +297,10 @@ def extract_names(lines, anchor_i):
                 am_line = search_area[j]
 
                 if not is_amharic(am_line):
+                    continue
+
+                # reject raw OCR line if contains symbols/numbers
+                if has_invalid_amharic_chars(am_line):
                     continue
 
                 cleaned_am = clean_amharic(am_line)
@@ -512,6 +543,10 @@ def extract_names_from_crop(image_path, debug_dir="temp"):
 
     for line in text_en.split("\n"):
 
+        # reject raw OCR line first
+        if has_invalid_english_chars(line):
+            continue
+
         cleaned = clean_english(line)
 
         print("EN TEST:", cleaned)
@@ -569,6 +604,10 @@ def extract_names_from_crop(image_path, debug_dir="temp"):
     name_am = ""
 
     for line in text_am.split("\n"):
+
+        # reject raw OCR line first
+        if has_invalid_amharic_chars(line):
+            continue
 
         cleaned = clean_amharic(line)
 
