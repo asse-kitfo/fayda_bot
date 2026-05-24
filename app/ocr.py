@@ -642,12 +642,15 @@ def parse_text(text):
     name_en, name_am = extract_names(lines, anchor_i)
 
     for i in range(anchor_i, len(lines)):
-        line = lines[i].lower()
+        line_raw = lines[i]
+        line_lower = line_raw.lower()
 
-        if "female" in line:
+        # check English first, then Amharic as fallback
+        # (OCR often garbles English but reads Amharic correctly)
+        if "female" in line_lower or "ሴት" in line_raw:
             gender_en = "Female"
             break
-        elif "male" in line:
+        elif "male" in line_lower or "ወንድ" in line_raw:
             gender_en = "Male"
             break
 
@@ -668,27 +671,31 @@ def parse_text(text):
 
         a, b = date_pairs[0]
 
-        # Gregorian contains month abbreviation
         if is_gregorian_date(a):
             dob_greg, dob_eth = a, b
         elif is_gregorian_date(b):
             dob_greg, dob_eth = b, a
+        elif is_ethiopian_date(a):
+            # Ethiopian is all-numeric DD/MM/YYYY — assign and other is Gregorian
+            dob_eth, dob_greg = a, b
+        elif is_ethiopian_date(b):
+            dob_eth, dob_greg = b, a
         else:
-            # fallback
             dob_greg, dob_eth = a, b
-
 
     if len(date_pairs) >= 2:
 
         a, b = date_pairs[1]
 
-        # Gregorian contains month abbreviation
         if is_gregorian_date(a):
             exp_greg, exp_eth = a, b
         elif is_gregorian_date(b):
             exp_greg, exp_eth = b, a
+        elif is_ethiopian_date(a):
+            exp_eth, exp_greg = a, b
+        elif is_ethiopian_date(b):
+            exp_eth, exp_greg = b, a
         else:
-            # fallback
             exp_greg, exp_eth = a, b
 
     return (
@@ -788,36 +795,38 @@ def confirm_dates(data):
         issues.append("DOB Ethiopian is invalid")
 
     # =====================================================
-    # EXP GREG
+    # EXP GREG (warning only — garbled month shouldn't block)
     # =====================================================
     exp_greg = data.get("exp_greg", "")
+    exp_warnings = []
 
     if suspicious(exp_greg) or not is_date(exp_greg):
-        issues.append("EXP Gregorian is invalid")
+        exp_warnings.append("EXP Gregorian is invalid")
 
     # =====================================================
-    # EXP ETH
+    # EXP ETH (warning only)
     # =====================================================
     exp_eth = data.get("exp_eth", "")
 
     if suspicious(exp_eth) or not is_date(exp_eth):
-        issues.append("EXP Ethiopian is invalid")
+        exp_warnings.append("EXP Ethiopian is invalid")
 
     # =====================================================
     # RESULT
+    # DOB issues block; EXP issues are warnings only
     # =====================================================
     if issues:
 
         return {
             "valid": False,
             "message": "incorrect date",
-            "issues": issues
+            "issues": issues + exp_warnings
         }
 
     return {
         "valid": True,
         "message": "",
-        "issues": []
+        "issues": exp_warnings
     }
 # =========================================================
 # AMHARIC OCR FIXES
