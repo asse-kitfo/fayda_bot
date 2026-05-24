@@ -7,3 +7,6 @@ temp/
 debug/
 *.jpg
 *.png
+*.jpeg
+*.tif
+*.webp
