@@ -65,6 +65,19 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         HELP_TEXT,
         parse_mode="Markdown"
     )
+
+# =========================================================
+# RESET COMMAND
+# =========================================================
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    user_sessions.pop(user_id, None)
+    processing_users.discard(user_id)
+    await update.message.reply_text(
+        "🔄 Session reset.\n\n"
+        "📸 Send a new *FRONT* ID screenshot to start again.",
+        parse_mode="Markdown"
+    )
 processing_users = set()
 
 # prevent duplicate processing
@@ -585,6 +598,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(
         MessageHandler(
             filters.PHOTO,
