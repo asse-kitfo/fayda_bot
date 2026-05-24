@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
+    CommandHandler,
     MessageHandler,
     filters,
     ContextTypes
@@ -28,6 +29,42 @@ if os.name == "nt":
     
 load_dotenv()
 user_sessions = {}
+
+HELP_TEXT = (
+    "📋 *How to use this bot:*\n\n"
+    "*Step 1 —* Send a screenshot of the *FRONT* of the Fayda Digital ID card.\n"
+    "The bot will extract your name, date of birth, gender, and ID number.\n\n"
+    "*Step 2 —* Send a clear *FACE PHOTO* of the person.\n"
+    "The background will be removed automatically.\n\n"
+    "*Step 3 —* Send a screenshot of the *BACK* of the ID card.\n"
+    "The bot will extract the address, phone number, and QR code.\n\n"
+    "✅ The bot will then generate high-quality front and back ID images.\n\n"
+    "📸 *Tips for best results:*\n"
+    "• Make sure the full ID is visible\n"
+    "• Text should be clear and not blurry\n"
+    "• No dark overlay or cropping\n"
+    "• Use a well-lit face photo\n\n"
+    "Type /help anytime to see these instructions again."
+)
+
+# =========================================================
+# START COMMAND
+# =========================================================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👋 Welcome to the *Fayda ID Card Generator Bot!*\n\n"
+        + HELP_TEXT,
+        parse_mode="Markdown"
+    )
+
+# =========================================================
+# HELP COMMAND
+# =========================================================
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        HELP_TEXT,
+        parse_mode="Markdown"
+    )
 processing_users = set()
 
 # prevent duplicate processing
@@ -546,6 +583,8 @@ def main():
         .build()
     )
 
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
     app.add_handler(
         MessageHandler(
             filters.PHOTO,
