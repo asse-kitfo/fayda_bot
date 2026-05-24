@@ -676,10 +676,16 @@ def parse_text(text):
 
     if len(date_pairs) >= 2:
 
-        eth, greg = date_pairs[1]
+        a, b = date_pairs[1]
 
-        exp_eth = eth
-        exp_greg = greg
+        # Gregorian contains month abbreviation
+        if is_gregorian_date(a):
+            exp_greg, exp_eth = a, b
+        elif is_gregorian_date(b):
+            exp_greg, exp_eth = b, a
+        else:
+            # fallback
+            exp_greg, exp_eth = a, b
 
     return (
         name_en, gender_en, dob_greg, exp_greg,
