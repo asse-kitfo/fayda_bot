@@ -4,6 +4,10 @@ import pytesseract
 import re
 import numpy as np
 
+# use high-quality tessdata_best trained models
+_TESSDATA = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tessdata")
+os.environ["TESSDATA_PREFIX"] = _TESSDATA
+
 # =========================================================
 # DEBUG SAVE
 # =========================================================
