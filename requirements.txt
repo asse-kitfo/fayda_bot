@@ -6,3 +6,11 @@ Pillow==10.4.0
 rembg==2.0.59
 onnxruntime==1.19.2
 python-dotenv==1.0.1
+numpy==2.1.1
+onnxruntime==1.19.2
+opencv-python-headless==4.10.0.84
+Pillow==10.4.0
+pytesseract==0.3.13
+python-dotenv==1.0.1
+python-telegram-bot==21.6
+rembg==2.0.59
