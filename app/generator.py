@@ -191,6 +191,16 @@ def draw_vertical_text(base_img, text, cfg, font_path):
 # =========================================================
 # FACE EXTRACTION + VALIDATION
 # =========================================================
+def _run_detector(detector, gray_img, scale=1.1, neighbors=5, min_sz=80):
+    faces = detector.detectMultiScale(
+        gray_img,
+        scaleFactor=scale,
+        minNeighbors=neighbors,
+        minSize=(min_sz, min_sz)
+    )
+    return faces if len(faces) > 0 else []
+
+
 def extract_face(image_path):
 
     img = cv2.imread(image_path)
@@ -201,71 +211,72 @@ def extract_face(image_path):
 
     h, w = img.shape[:2]
 
-    # =====================================================
-    # FIXED REGION
-    # =====================================================
-    x1 = int(w * 0.20)
-    y1 = int(h * 0.18)
-
-    x2 = int(w * 0.80)
-    y2 = int(h * 0.46)
-
-    face_crop = img[y1:y2, x1:x2]
-
-    # =====================================================
-    # FACE DETECTION
-    # =====================================================
-    gray = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
-
     detector = cv2.CascadeClassifier(
         cv2.data.haarcascades +
         "haarcascade_frontalface_default.xml"
     )
 
-    faces = detector.detectMultiScale(
-        gray,
-        scaleFactor=1.1,
-        minNeighbors=5,
-        minSize=(80, 80)
-    )
+    # =====================================================
+    # ATTEMPT 1 — fixed upper-centre region, strict params
+    # =====================================================
+    x1 = int(w * 0.20)
+    y1 = int(h * 0.08)
+    x2 = int(w * 0.80)
+    y2 = int(h * 0.55)
+    region = img[y1:y2, x1:x2]
+    gray_region = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+
+    faces = _run_detector(detector, gray_region, scale=1.1, neighbors=5, min_sz=60)
+    source_img, offset_x, offset_y = region, x1, y1
 
     # =====================================================
-    # NO FACE FOUND
+    # ATTEMPT 2 — full image, strict params
     # =====================================================
     if len(faces) == 0:
-
-        print("❌ No face detected")
-
-        return None
+        gray_full = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = _run_detector(detector, gray_full, scale=1.1, neighbors=5, min_sz=60)
+        source_img, offset_x, offset_y = img, 0, 0
 
     # =====================================================
-    # USE LARGEST FACE
+    # ATTEMPT 3 — full image, lenient params
     # =====================================================
-    largest = max(
-        faces,
-        key=lambda f: f[2] * f[3]
-    )
+    if len(faces) == 0:
+        gray_full = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        faces = _run_detector(detector, gray_full, scale=1.05, neighbors=3, min_sz=30)
+        source_img, offset_x, offset_y = img, 0, 0
 
+    # =====================================================
+    # ATTEMPT 4 — centre crop fallback
+    # user confirmed it's a face photo; use centre portion
+    # =====================================================
+    if len(faces) == 0:
+        print("⚠️ Haar cascade failed — using centre crop fallback")
+        cx1 = int(w * 0.15)
+        cy1 = int(h * 0.05)
+        cx2 = int(w * 0.85)
+        cy2 = int(h * 0.75)
+        fallback = img[cy1:cy2, cx1:cx2]
+        final_face = cv2.cvtColor(fallback, cv2.COLOR_BGR2RGB)
+        pil = Image.fromarray(final_face).convert("RGBA")
+        est = int(min(fallback.shape[0], fallback.shape[1]) * 0.5)
+        return (pil, est, est)
+
+    # =====================================================
+    # USE LARGEST DETECTED FACE
+    # =====================================================
+    largest = max(faces, key=lambda f: f[2] * f[3])
     fx, fy, fw, fh = largest
 
-    # =====================================================
-    # ADD PADDING
-    # =====================================================
     pad_x = int(fw * 0.35)
     pad_y = int(fh * 0.45)
 
     sx1 = max(0, fx - pad_x)
     sy1 = max(0, fy - pad_y)
+    sx2 = min(source_img.shape[1], fx + fw + pad_x)
+    sy2 = min(source_img.shape[0], fy + fh + pad_y)
 
-    sx2 = min(face_crop.shape[1], fx + fw + pad_x)
-    sy2 = min(face_crop.shape[0], fy + fh + pad_y)
-
-    final_face = face_crop[sy1:sy2, sx1:sx2]
-
-    final_face = cv2.cvtColor(
-        final_face,
-        cv2.COLOR_BGR2RGB
-    )
+    final_face = source_img[sy1:sy2, sx1:sx2]
+    final_face = cv2.cvtColor(final_face, cv2.COLOR_BGR2RGB)
 
     return (
         Image.fromarray(final_face).convert("RGBA"),
