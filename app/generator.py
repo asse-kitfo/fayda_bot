@@ -267,15 +267,22 @@ def extract_face(image_path):
     largest = max(faces, key=lambda f: f[2] * f[3])
     fx, fy, fw, fh = largest
 
-    pad_x = int(fw * 0.35)
-    pad_y = int(fh * 0.45)
+    pad_x = int(fw * 0.45)
+    pad_y = int(fh * 0.55)
 
-    sx1 = max(0, fx - pad_x)
-    sy1 = max(0, fy - pad_y)
-    sx2 = min(source_img.shape[1], fx + fw + pad_x)
-    sy2 = min(source_img.shape[0], fy + fh + pad_y)
+    # Always translate coordinates back to the FULL image before clamping.
+    # Using source_img (a cropped region) as the clamp boundary loses
+    # padding when the face sits near the region edge — that's what caused
+    # the top/right/bottom of the photo to appear cut.
+    full_fx = fx + offset_x
+    full_fy = fy + offset_y
 
-    final_face = source_img[sy1:sy2, sx1:sx2]
+    sx1 = max(0, full_fx - pad_x)
+    sy1 = max(0, full_fy - pad_y)
+    sx2 = min(img.shape[1], full_fx + fw + pad_x)
+    sy2 = min(img.shape[0], full_fy + fh + pad_y)
+
+    final_face = img[sy1:sy2, sx1:sx2]
     final_face = cv2.cvtColor(final_face, cv2.COLOR_BGR2RGB)
 
     return (
@@ -782,6 +789,29 @@ def generate_id(data, image_path, output_path, debug_dir="temp"):
     y_offset = int(
         f["y"] + (f["height"] - new_h) / 2
     )
+
+    # =====================================================
+    # CLAMP TO TEMPLATE BOUNDS — prevent PIL from silently
+    # clipping the face when it overflows the template edge.
+    # Instead, crop the face image to the visible region.
+    # =====================================================
+    tmpl_w, tmpl_h = template.size
+
+    # How much of the face sticks outside each edge
+    clip_left   = max(0, -x_offset)
+    clip_top    = max(0, -y_offset)
+    clip_right  = max(0, (x_offset + new_w) - tmpl_w)
+    clip_bottom = max(0, (y_offset + new_h) - tmpl_h)
+
+    if clip_left or clip_top or clip_right or clip_bottom:
+        face = face.crop((
+            clip_left,
+            clip_top,
+            new_w - clip_right,
+            new_h - clip_bottom
+        ))
+        x_offset = max(0, x_offset)
+        y_offset = max(0, y_offset)
 
     template.paste(face, (x_offset, y_offset), face)
 
