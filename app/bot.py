@@ -2,11 +2,12 @@ import os
 import uuid
 
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     filters,
     ContextTypes
 )
@@ -27,7 +28,7 @@ if os.name == "nt":
     asyncio.set_event_loop_policy(
         asyncio.WindowsSelectorEventLoopPolicy()
     )
-    
+
 load_dotenv()
 user_sessions = {}
 
@@ -49,16 +50,70 @@ HELP_TEXT = (
 )
 
 # =========================================================
+# KEYBOARD BUILDERS
+# =========================================================
+def main_menu_keyboard(has_access_flag: bool, pts) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton("📋 How to Use", callback_data="help")]
+    ]
+    if has_access_flag:
+        if pts is None:
+            points_label = "♾ Unlimited Access"
+        else:
+            points_label = f"🎯 My Points ({pts})"
+        buttons.append([InlineKeyboardButton(points_label, callback_data="mypoints")])
+    else:
+        buttons.append([InlineKeyboardButton("📨 Request Access", callback_data="request_access")])
+    buttons.append([InlineKeyboardButton("🔄 Reset Session", callback_data="reset")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def no_access_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📨 Request Access", callback_data="request_access")],
+        [InlineKeyboardButton("🎯 My Points", callback_data="mypoints")],
+    ])
+
+
+def done_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Generate Another", callback_data="start_again")],
+        [InlineKeyboardButton("🎯 My Points", callback_data="mypoints")],
+    ])
+
+
+def reset_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Reset Session", callback_data="reset")],
+    ])
+
+
+def admin_grant_keyboard(user_id: int, username: str) -> InlineKeyboardMarkup:
+    uname = username or str(user_id)
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Grant 10 pts", callback_data=f"admin_grant_{user_id}_10"),
+            InlineKeyboardButton("♾ Unlimited",    callback_data=f"admin_grant_{user_id}_unlimited"),
+        ],
+        [InlineKeyboardButton("❌ Deny", callback_data=f"admin_deny_{user_id}_{uname}")],
+    ])
+
+
+# =========================================================
 # START COMMAND
 # =========================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.message.from_user
     access.register(u.id, u.username)
+    pts = access.get_points(u.id)
+    has_acc = access.has_access(u.id)
+
     await update.message.reply_text(
-        "👋 Welcome to the *Fayda ID Card Generator Bot!*\n\n"
-        + HELP_TEXT,
-        parse_mode="Markdown"
+        "👋 Welcome to the *Fayda ID Card Generator Bot!*\n\n" + HELP_TEXT,
+        parse_mode="Markdown",
+        reply_markup=main_menu_keyboard(has_acc, pts)
     )
+
 
 # =========================================================
 # HELP COMMAND
@@ -68,8 +123,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     access.register(u.id, u.username)
     await update.message.reply_text(
         HELP_TEXT,
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=reset_keyboard()
     )
+
 
 # =========================================================
 # RESET COMMAND
@@ -85,51 +142,15 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+
 # =========================================================
 # REQUEST COMMAND — user asks for access
 # =========================================================
 async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.message.from_user
     access.register(u.id, u.username)
-    uname = u.username or str(u.id)
+    await _do_request_access(update.message.reply_text, context, u)
 
-    pts = access.get_points(u.id)
-
-    if pts is None:
-        await update.message.reply_text("✅ You already have unlimited access.")
-        return
-
-    if pts > 0:
-        await update.message.reply_text(
-            f"✅ You already have *{pts}* point(s).",
-            parse_mode="Markdown"
-        )
-        return
-
-    await update.message.reply_text(
-        "📨 Access request sent to the admin.\n"
-        "You will be notified once access is granted."
-    )
-    print(f"🔔 ACCESS REQUEST from @{uname} (id={u.id})")
-
-    # Notify every known admin via DM
-    admin_ids = access.get_admin_ids()
-    for admin_id in admin_ids:
-        try:
-            await context.bot.send_message(
-                chat_id=admin_id,
-                text=(
-                    f"🔔 *New access request*\n\n"
-                    f"User: @{uname}\n"
-                    f"ID: `{u.id}`\n\n"
-                    f"Reply with:\n"
-                    f"`/grant @{uname} 10`  — give 10 points\n"
-                    f"`/grant @{uname} unlimited`  — unlimited access"
-                ),
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            print(f"⚠️ Could not notify admin {admin_id}: {e}")
 
 # =========================================================
 # MYPOINTS COMMAND
@@ -137,21 +158,8 @@ async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def mypoints_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.message.from_user
     access.register(u.id, u.username)
-    pts = access.get_points(u.id)
+    await _send_points(update.message.reply_text, u.id)
 
-    if pts is None:
-        await update.message.reply_text("♾ You have *unlimited* access.", parse_mode="Markdown")
-    elif pts == 0:
-        await update.message.reply_text(
-            "❌ You have *0 points*.\n\nUse /request to ask for access.",
-            parse_mode="Markdown"
-        )
-    else:
-        await update.message.reply_text(
-            f"🎯 You have *{pts}* point(s) remaining.\n"
-            f"Each front+back generation uses 1 point.",
-            parse_mode="Markdown"
-        )
 
 # =========================================================
 # GRANT COMMAND (admin only)
@@ -178,9 +186,9 @@ async def grant_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = access.grant(target, amount)
     await update.message.reply_text(result)
 
+
 # =========================================================
 # REVOKE COMMAND (admin only)
-# Usage: /revoke @username
 # =========================================================
 async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.message.from_user
@@ -202,8 +210,9 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = access.revoke(target)
     await update.message.reply_text(result)
 
+
 # =========================================================
-# USERS COMMAND (admin only) — list all registered users
+# USERS COMMAND (admin only)
 # =========================================================
 async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.message.from_user
@@ -217,43 +226,218 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         access.list_users(),
         parse_mode="Markdown"
     )
+
+
+# =========================================================
+# SHARED HELPERS
+# =========================================================
+async def _send_points(reply_fn, user_id: int):
+    pts = access.get_points(user_id)
+    if pts is None:
+        await reply_fn("♾ You have *unlimited* access.", parse_mode="Markdown")
+    elif pts == 0:
+        await reply_fn(
+            "❌ You have *0 points*.\n\nUse the button below to request access.",
+            parse_mode="Markdown",
+            reply_markup=no_access_keyboard()
+        )
+    else:
+        await reply_fn(
+            f"🎯 You have *{pts}* point(s) remaining.\n"
+            f"Each front+back generation uses 1 point.",
+            parse_mode="Markdown"
+        )
+
+
+async def _do_request_access(reply_fn, context, u):
+    uname = u.username or str(u.id)
+    pts = access.get_points(u.id)
+
+    if pts is None:
+        await reply_fn("✅ You already have unlimited access.")
+        return
+
+    if pts > 0:
+        await reply_fn(
+            f"✅ You already have *{pts}* point(s).",
+            parse_mode="Markdown"
+        )
+        return
+
+    await reply_fn(
+        "📨 Access request sent to the admin.\n"
+        "You will be notified once access is granted."
+    )
+    print(f"🔔 ACCESS REQUEST from @{uname} (id={u.id})")
+
+    admin_ids = access.get_admin_ids()
+    for admin_id in admin_ids:
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=(
+                    f"🔔 *New access request*\n\n"
+                    f"User: @{uname}\n"
+                    f"ID: `{u.id}`"
+                ),
+                parse_mode="Markdown",
+                reply_markup=admin_grant_keyboard(u.id, uname)
+            )
+        except Exception as e:
+            print(f"⚠️ Could not notify admin {admin_id}: {e}")
+
+
+# =========================================================
+# INLINE BUTTON CALLBACK HANDLER
+# =========================================================
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    u = query.from_user
+    access.register(u.id, u.username)
+    data = query.data
+
+    # -------------------------------------------------------
+    # HELP
+    # -------------------------------------------------------
+    if data == "help":
+        await query.message.reply_text(
+            HELP_TEXT,
+            parse_mode="Markdown",
+            reply_markup=reset_keyboard()
+        )
+
+    # -------------------------------------------------------
+    # MY POINTS
+    # -------------------------------------------------------
+    elif data == "mypoints":
+        await _send_points(query.message.reply_text, u.id)
+
+    # -------------------------------------------------------
+    # REQUEST ACCESS
+    # -------------------------------------------------------
+    elif data == "request_access":
+        await _do_request_access(query.message.reply_text, context, u)
+
+    # -------------------------------------------------------
+    # RESET SESSION
+    # -------------------------------------------------------
+    elif data == "reset" or data == "start_again":
+        user_sessions.pop(u.id, None)
+        processing_users.discard(u.id)
+        await query.message.reply_text(
+            "🔄 Session reset.\n\n"
+            "📸 Send a *FRONT* ID screenshot to begin.",
+            parse_mode="Markdown"
+        )
+
+    # -------------------------------------------------------
+    # ADMIN: GRANT
+    # admin_grant_{user_id}_{amount}
+    # -------------------------------------------------------
+    elif data.startswith("admin_grant_"):
+        if not access.is_admin(u.id, u.username):
+            await query.message.reply_text("❌ Admin only.")
+            return
+
+        parts = data.split("_")
+        # admin_grant_{user_id}_{amount}  → parts[2]=user_id, parts[3]=amount
+        target_uid = parts[2]
+        amount     = parts[3]
+
+        target_data = access._load()
+        target_user = target_data["users"].get(target_uid, {})
+        target_uname = target_user.get("username") or target_uid
+
+        result = access.grant(target_uname, amount)
+
+        # edit the original request message to show it's been handled
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text(f"✅ Done — {result}")
+        except Exception:
+            await query.message.reply_text(f"✅ Done — {result}")
+
+        # notify the user
+        try:
+            if amount == "unlimited":
+                user_msg = "🎉 Your access has been *granted* — you now have *unlimited* access!\n\nSend a FRONT ID screenshot to begin."
+            else:
+                user_msg = f"🎉 Your access has been *granted* — you now have *{amount}* point(s)!\n\nSend a FRONT ID screenshot to begin."
+            await context.bot.send_message(
+                chat_id=int(target_uid),
+                text=user_msg,
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            print(f"⚠️ Could not notify user {target_uid}: {e}")
+
+    # -------------------------------------------------------
+    # ADMIN: DENY
+    # admin_deny_{user_id}_{username}
+    # -------------------------------------------------------
+    elif data.startswith("admin_deny_"):
+        if not access.is_admin(u.id, u.username):
+            await query.message.reply_text("❌ Admin only.")
+            return
+
+        parts = data.split("_", 3)
+        target_uid  = parts[2]
+        target_uname = parts[3] if len(parts) > 3 else target_uid
+
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text(f"❌ Access denied for @{target_uname}.")
+        except Exception:
+            await query.message.reply_text(f"❌ Access denied for @{target_uname}.")
+
+        try:
+            await context.bot.send_message(
+                chat_id=int(target_uid),
+                text=(
+                    "❌ Your access request was not approved at this time.\n\n"
+                    "Contact the admin or try again later."
+                )
+            )
+        except Exception as e:
+            print(f"⚠️ Could not notify user {target_uid}: {e}")
+
+
+# =========================================================
+# STATE TRACKING
+# =========================================================
 processing_users = set()
+processed_files  = {}
+SESSION_TIMEOUT  = 1200
 
-# prevent duplicate processing
-processed_files = {}
 
-# session timeout (20 minutes)
-SESSION_TIMEOUT = 1200
 # =========================================================
 # SAFE REPLY
-# prevents crash if telegram fails while replying
 # =========================================================
 async def safe_reply(method, *args, **kwargs):
-
     try:
         return await method(*args, **kwargs)
-
     except Exception as e:
         print("⚠️ Reply failed:", e)
         return None
+
 
 # =========================================================
 # CLEAR EXPIRED SESSION
 # =========================================================
 def clear_expired_session(user_id):
-
     session = user_sessions.get(user_id)
-
     if not session:
         return
-
-    created = session.get("created_at", 0)
-
-    if time.time() - created > SESSION_TIMEOUT:
-
+    if time.time() - session.get("created_at", 0) > SESSION_TIMEOUT:
         print(f"🧹 Expired session cleared: {user_id}")
-
         user_sessions.pop(user_id, None)
+
+
+# =========================================================
+# IMAGE HANDLER
+# =========================================================
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = None
@@ -264,73 +448,45 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         u = update.message.from_user
         access.register(user_id, u.username)
 
-        # clear old session
         clear_expired_session(user_id)
 
-        # =====================================================
+        # -----------------------------------------------
         # GLOBAL PROCESS LOCK
-        # =====================================================
+        # -----------------------------------------------
         if user_id in processing_users:
-
             await update.message.reply_text(
                 "⏳ Previous request still processing..."
             )
-
             return
 
         processing_users.add(user_id)
 
         photo = update.message.photo[-1]
-
-        file = await photo.get_file()
+        file  = await photo.get_file()
 
         os.makedirs("temp", exist_ok=True)
-
         user_temp = f"temp/{user_id}"
         os.makedirs(user_temp, exist_ok=True)
 
-        # =====================================================
-        # UNIQUE TELEGRAM FILE ID
-        # prevents duplicate upload retries
-        # =====================================================
         telegram_file_id = photo.file_unique_id
-        
-        # =====================================================
-        # GLOBAL DUPLICATE DETECTION
-        # prevents Telegram resend/retry duplication
-        # =====================================================
         cache_key = f"{user_id}_{telegram_file_id}"
 
         if cache_key in processed_files:
-
             await safe_reply(
                 update.message.reply_text,
                 "⚠️ This image was already uploaded."
             )
-
             return
 
         session = user_sessions.get(user_id)
 
-        # =====================================================
-        # BLOCK SAME IMAGE RETRY
-        # =====================================================
         if session:
-
-            last_file = session.get("last_file_id")
-
-            if last_file == telegram_file_id:
-
-                await update.message.reply_text(
-                    "⚠️ This image was already uploaded."
-                )
-
+            if session.get("last_file_id") == telegram_file_id:
+                await update.message.reply_text("⚠️ This image was already uploaded.")
                 return
 
-        job_id = str(uuid.uuid4())
-
+        job_id    = str(uuid.uuid4())
         file_path = f"{user_temp}/{job_id}.jpg"
-
         await file.download_to_drive(file_path)
 
         # =====================================================
@@ -338,19 +494,15 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # =====================================================
         if not session:
 
-            # -------------------------------------------------
-            # ACCESS CHECK — only for new sessions
-            # -------------------------------------------------
             if not access.has_access(user_id):
                 await update.message.reply_text(
                     "🔒 You don't have access to this bot.\n\n"
-                    "Use /request to ask for access from the admin."
+                    "Tap the button below to request access from the admin.",
+                    reply_markup=no_access_keyboard()
                 )
                 return
 
-            await update.message.reply_text(
-                "🔍 Processing front ID..."
-            )
+            await update.message.reply_text("🔍 Processing front ID...")
 
             front_data = process_ocr(
                 file_path,
@@ -361,17 +513,14 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if front_data.get("problems"):
 
                 problems = front_data["problems"]
-                issues = front_data.get("issues", [])
+                issues   = front_data.get("issues", [])
 
                 msg = "❌ OCR validation failed.\n\n"
-
                 for p in problems:
                     msg += f"• {p}\n"
 
                 if issues:
-
                     msg += "\nDetected issues:\n"
-
                     for issue in issues:
                         msg += f" - {issue}\n"
 
@@ -386,38 +535,29 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 await safe_reply(
                     update.message.reply_text,
-                    msg
+                    msg,
+                    reply_markup=reset_keyboard()
                 )
-
                 return
-            
+
             processed_files[cache_key] = time.time()
 
-            # =================================================
-            # SAVE SESSION
-            # =================================================
             user_sessions[user_id] = {
-
                 "step": "waiting_face",
-
                 "front_data": front_data,
-
                 "job_id": job_id,
-
                 "last_file_id": telegram_file_id,
-
                 "created_at": time.time(),
-
-                # locks
                 "front_processing": False,
                 "back_processing": False
             }
 
             await update.message.reply_text(
                 "✅ Front data extracted.\n\n"
-                "📸 Now send face photo."
+                "📸 Now send the *face photo* of the person.",
+                parse_mode="Markdown",
+                reply_markup=reset_keyboard()
             )
-
             return
 
         # =====================================================
@@ -430,36 +570,22 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # =====================================================
         if session["step"] == "waiting_face":
 
-            # already processing
             if session.get("front_processing"):
-
                 await safe_reply(
                     update.message.reply_text,
                     "⏳ Face processing already running..."
                 )
-
                 return
 
             session["front_processing"] = True
-
-            # atomic transition
             session["step"] = "generating_front"
-
             session["last_file_id"] = telegram_file_id
 
-            await safe_reply(
-                update.message.reply_text,
-                "🧑 Processing face..."
-            )
+            await safe_reply(update.message.reply_text, "🧑 Processing face...")
 
-            front_data = session["front_data"]
+            front_data   = session["front_data"]
+            front_output = f"temp/{user_id}/front_{session['job_id']}.tif"
 
-            front_output = (
-                f"temp/{user_id}/front_{session['job_id']}.tif"
-            )
-
-
-            
             front_path = generate_id(
                 front_data,
                 file_path,
@@ -467,83 +593,56 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 debug_dir=user_temp
             )
 
-            # =================================================
-            # FACE FAILED
-            # =================================================
             if not front_path:
-
                 session["front_processing"] = False
                 session["step"] = "waiting_face"
-
                 await safe_reply(
                     update.message.reply_text,
                     "❌ No human face detected.\n\n"
-                    "📸 Please upload a clear face photo."
+                    "📸 Please upload a clear face photo.",
+                    reply_markup=reset_keyboard()
                 )
-
                 return
-            
+
             processed_files[cache_key] = time.time()
-            # =================================================
-            # MARK FRONT AS COMPLETED
-            # IMPORTANT FIX
-            # =================================================
-            session["front_generated"] = True
+            session["front_generated"]  = True
             session["front_processing"] = False
 
-            # =================================================
-            # SEND FRONT FILE
-            # =================================================
             try:
-
                 with open(front_path, "rb") as f:
-
-                    await update.message.reply_document(
-                        document=f
-                    )
-
+                    await update.message.reply_document(document=f)
             except Exception as e:
-
                 print("⚠️ Failed sending front:", e)
 
-            # =================================================
-            # MOVE TO NEXT STEP IMMEDIATELY
-            # even if telegram/network fails
-            # =================================================
             session["step"] = "waiting_back"
 
             await safe_reply(
                 update.message.reply_text,
-                "✅ Front generated.\n\n"
-                "📸 Now send BACK screenshot."
+                "✅ Front ID generated.\n\n"
+                "📸 Now send the *BACK* screenshot of the ID card.",
+                parse_mode="Markdown",
+                reply_markup=reset_keyboard()
             )
-
             return
+
         # =====================================================
         # ALREADY GENERATING FRONT
         # =====================================================
         if session["step"] == "generating_front":
-
-            await update.message.reply_text(
-                "⏳ Front generation already in progress..."
-            )
-
+            await update.message.reply_text("⏳ Front generation already in progress...")
             return
-        
+
         # =====================================================
         # BACK ALREADY FINISHED
         # =====================================================
         if session.get("back_generated"):
-
             await safe_reply(
                 update.message.reply_text,
                 "⚠️ Process already completed.\n\n"
-                "📸 Send a new FRONT screenshot."
+                "Tap below to start a new generation.",
+                reply_markup=done_keyboard()
             )
-
             return
-        
-
 
         # =====================================================
         # STEP 3 → BACK
@@ -551,47 +650,30 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if session["step"] == "waiting_back":
 
             if session.get("back_processing"):
-
                 await safe_reply(
                     update.message.reply_text,
                     "⏳ Back side processing already running..."
                 )
-
                 return
 
             session["back_processing"] = True
-
-            # atomic lock
             session["step"] = "generating_back"
-
             session["last_file_id"] = telegram_file_id
 
-            await safe_reply(
-                update.message.reply_text,
-                "🔍 Processing back side..."
-            )
-            
-            # =================================================
-            # VALIDATE BACK SCREENSHOT
-            # =================================================
+            await safe_reply(update.message.reply_text, "🔍 Processing back side...")
+
             back_data, qr_crop = process_back_ocr(file_path)
 
-            # =================================================
-            # INVALID BACK SCREENSHOT
-            # =================================================
             if (
                 not back_data
                 or qr_crop is None
                 or back_data.get("problems")
             ):
-                
                 session["back_processing"] = False
                 session["step"] = "waiting_back"
 
                 msg = "❌ BACK validation failed.\n\n"
-
-                problems = back_data.get("problems", [])
-
+                problems = back_data.get("problems", []) if back_data else []
                 for p in problems:
                     msg += f"• {p}\n"
 
@@ -603,28 +685,19 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "• Text is readable\n"
                     "• No dark overlay exists"
                 )
-                
 
                 await safe_reply(
                     update.message.reply_text,
-                    msg
+                    msg,
+                    reply_markup=reset_keyboard()
                 )
-
                 return
-            
 
-            front_data = session["front_data"]
-
+            front_data  = session["front_data"]
             processed_files[cache_key] = time.time()
-            
-            person_name = front_data.get(
-                "name_en",
-                "unknown"
-            )
 
-            back_output = (
-                f"temp/{user_id}/back_{session['job_id']}.tif"
-            )
+            person_name = front_data.get("name_en", "unknown")
+            back_output = f"temp/{user_id}/back_{session['job_id']}.tif"
 
             back_path = generate_back(
                 back_data,
@@ -633,103 +706,74 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 person_name
             )
 
-            # =================================================
-            # MARK BACK GENERATED + DEDUCT POINT
-            # =================================================
-            session["back_generated"] = True
+            session["back_generated"]  = True
             session["back_processing"] = False
             access.deduct_point(user_id)
 
-            # =================================================
-            # SEND BACK FILE
-            # =================================================
             try:
-
                 with open(back_path, "rb") as f:
-
-                    await update.message.reply_document(
-                        document=f
-                    )
-
+                    await update.message.reply_document(document=f)
             except Exception as e:
-
                 print("⚠️ Failed sending back:", e)
 
-            # =================================================
-            # FINISH SESSION
-            # IMPORTANT:
-            # clear session even if sending failed
-            # =================================================
             user_sessions.pop(user_id, None)
+
+            pts = access.get_points(user_id)
+            if pts is None:
+                pts_line = "♾ Unlimited access remaining."
+            elif pts == 0:
+                pts_line = "⚠️ You have *0 points* left. Use the button below to request more."
+            else:
+                pts_line = f"🎯 You have *{pts}* point(s) remaining."
 
             await safe_reply(
                 update.message.reply_text,
-                "✅ Back generated.\n\n"
-                "Send another FRONT screenshot to start again."
+                f"✅ Back ID generated. All done!\n\n{pts_line}",
+                parse_mode="Markdown",
+                reply_markup=done_keyboard()
             )
-
             return
-        
+
         # =====================================================
         # FRONT ALREADY FINISHED
         # =====================================================
-        if (
-            session.get("front_generated")
-            and session["step"] != "waiting_back"
-        ):
-
+        if session.get("front_generated") and session["step"] != "waiting_back":
             await safe_reply(
                 update.message.reply_text,
                 "⚠️ Front already generated.\n\n"
-                "📸 Please send BACK screenshot."
+                "📸 Please send the *BACK* ID screenshot.",
+                parse_mode="Markdown",
+                reply_markup=reset_keyboard()
             )
-
             return
+
     # =========================================================
     # ERRORS
     # =========================================================
     except TimedOut:
-
         print("❌ Timeout")
-
-        await safe_reply(
-            update.message.reply_text,
-            "⚠️ Network timeout."
-        )
+        await safe_reply(update.message.reply_text, "⚠️ Network timeout.")
 
     except NetworkError:
-
         print("❌ Network Error")
-
-        await safe_reply(
-            update.message.reply_text,
-            "⚠️ Network error."
-        )
+        await safe_reply(update.message.reply_text, "⚠️ Network error.")
 
     except Exception as e:
-
         print("❌ ERROR:", e)
-
         await safe_reply(
             update.message.reply_text,
-            "⚠️ Something went wrong."
+            "⚠️ Something went wrong. Tap below to reset and try again.",
+            reply_markup=reset_keyboard()
         )
 
     finally:
-
         if user_id is not None:
-
-            # cleanup old duplicate cache
             now = time.time()
-
-            processed_files_copy = processed_files.copy()
-
-            for key, ts in processed_files_copy.items():
-
+            for key, ts in list(processed_files.items()):
                 if now - ts > 120:
-
                     processed_files.pop(key, None)
             processing_users.discard(user_id)
+
 
 # =========================================================
 # MAIN
@@ -737,7 +781,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
 
     TOKEN = os.getenv("BOT_TOKEN")
-    
+
     app = (
         ApplicationBuilder()
         .token(TOKEN)
@@ -748,30 +792,30 @@ def main():
         .build()
     )
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("reset", reset_command))
-    app.add_handler(CommandHandler("request", request_command))
+    app.add_handler(CommandHandler("start",    start))
+    app.add_handler(CommandHandler("help",     help_command))
+    app.add_handler(CommandHandler("reset",    reset_command))
+    app.add_handler(CommandHandler("request",  request_command))
     app.add_handler(CommandHandler("mypoints", mypoints_command))
-    app.add_handler(CommandHandler("grant", grant_command))
-    app.add_handler(CommandHandler("revoke", revoke_command))
-    app.add_handler(CommandHandler("users", users_command))
+    app.add_handler(CommandHandler("grant",    grant_command))
+    app.add_handler(CommandHandler("revoke",   revoke_command))
+    app.add_handler(CommandHandler("users",    users_command))
+
+    app.add_handler(CallbackQueryHandler(handle_callback))
+
     app.add_handler(
-        MessageHandler(
-            filters.PHOTO,
-            handle_image
-        )
+        MessageHandler(filters.PHOTO, handle_image)
     )
-    
+
     app.job_queue.run_repeating(
         lambda *_: cleanup_old_dirs(30),
         interval=600,
         first=600
     )
-    
+
     print("🚀 Initializing OCR and segmentation models...")
     print("✅ Bot running...")
-    
+
     app.run_polling()
 
 
