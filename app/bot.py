@@ -19,6 +19,7 @@ from app.generator import generate_id
 from app.back_ocr import process_back_ocr
 from app.back_generator import generate_back
 from app.utils import cleanup_old_dirs
+from app import access
 import time
 import asyncio
 
@@ -51,6 +52,8 @@ HELP_TEXT = (
 # START COMMAND
 # =========================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = update.message.from_user
+    access.register(u.id, u.username)
     await update.message.reply_text(
         "👋 Welcome to the *Fayda ID Card Generator Bot!*\n\n"
         + HELP_TEXT,
@@ -61,6 +64,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # HELP COMMAND
 # =========================================================
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = update.message.from_user
+    access.register(u.id, u.username)
     await update.message.reply_text(
         HELP_TEXT,
         parse_mode="Markdown"
@@ -71,11 +76,126 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================================================
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
+    access.register(user_id, update.message.from_user.username)
     user_sessions.pop(user_id, None)
     processing_users.discard(user_id)
     await update.message.reply_text(
         "🔄 Session reset.\n\n"
         "📸 Send a new *FRONT* ID screenshot to start again.",
+        parse_mode="Markdown"
+    )
+
+# =========================================================
+# REQUEST COMMAND — user asks for access
+# =========================================================
+async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = update.message.from_user
+    access.register(u.id, u.username)
+    uname = u.username or str(u.id)
+
+    pts = access.get_points(u.id)
+
+    if pts is None:
+        await update.message.reply_text("✅ You already have unlimited access.")
+        return
+
+    if pts > 0:
+        await update.message.reply_text(
+            f"✅ You already have *{pts}* point(s).",
+            parse_mode="Markdown"
+        )
+        return
+
+    await update.message.reply_text(
+        "📨 Access request sent to the admin.\n"
+        "You will be notified once access is granted."
+    )
+    print(f"🔔 ACCESS REQUEST from @{uname} (id={u.id})")
+
+# =========================================================
+# MYPOINTS COMMAND
+# =========================================================
+async def mypoints_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = update.message.from_user
+    access.register(u.id, u.username)
+    pts = access.get_points(u.id)
+
+    if pts is None:
+        await update.message.reply_text("♾ You have *unlimited* access.", parse_mode="Markdown")
+    elif pts == 0:
+        await update.message.reply_text(
+            "❌ You have *0 points*.\n\nUse /request to ask for access.",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(
+            f"🎯 You have *{pts}* point(s) remaining.\n"
+            f"Each front+back generation uses 1 point.",
+            parse_mode="Markdown"
+        )
+
+# =========================================================
+# GRANT COMMAND (admin only)
+# Usage: /grant @username 10   or   /grant @username unlimited
+# =========================================================
+async def grant_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = update.message.from_user
+    access.register(u.id, u.username)
+
+    if not access.is_admin(u.id, u.username):
+        await update.message.reply_text("❌ Admin only.")
+        return
+
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            "Usage: `/grant @username 10`  or  `/grant @username unlimited`",
+            parse_mode="Markdown"
+        )
+        return
+
+    target = args[0].strip("@")
+    amount = args[1]
+    result = access.grant(target, amount)
+    await update.message.reply_text(result)
+
+# =========================================================
+# REVOKE COMMAND (admin only)
+# Usage: /revoke @username
+# =========================================================
+async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = update.message.from_user
+    access.register(u.id, u.username)
+
+    if not access.is_admin(u.id, u.username):
+        await update.message.reply_text("❌ Admin only.")
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Usage: `/revoke @username`",
+            parse_mode="Markdown"
+        )
+        return
+
+    target = args[0].strip("@")
+    result = access.revoke(target)
+    await update.message.reply_text(result)
+
+# =========================================================
+# USERS COMMAND (admin only) — list all registered users
+# =========================================================
+async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = update.message.from_user
+    access.register(u.id, u.username)
+
+    if not access.is_admin(u.id, u.username):
+        await update.message.reply_text("❌ Admin only.")
+        return
+
+    await update.message.reply_text(
+        access.list_users(),
         parse_mode="Markdown"
     )
 processing_users = set()
@@ -122,7 +242,9 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
 
         user_id = update.message.from_user.id
-        
+        u = update.message.from_user
+        access.register(user_id, u.username)
+
         # clear old session
         clear_expired_session(user_id)
 
@@ -196,6 +318,16 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # STEP 1 → FRONT OCR
         # =====================================================
         if not session:
+
+            # -------------------------------------------------
+            # ACCESS CHECK — only for new sessions
+            # -------------------------------------------------
+            if not access.has_access(user_id):
+                await update.message.reply_text(
+                    "🔒 You don't have access to this bot.\n\n"
+                    "Use /request to ask for access from the admin."
+                )
+                return
 
             await update.message.reply_text(
                 "🔍 Processing front ID..."
@@ -483,10 +615,11 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
             # =================================================
-            # MARK BACK GENERATED
+            # MARK BACK GENERATED + DEDUCT POINT
             # =================================================
             session["back_generated"] = True
             session["back_processing"] = False
+            access.deduct_point(user_id)
 
             # =================================================
             # SEND BACK FILE
@@ -599,6 +732,11 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("reset", reset_command))
+    app.add_handler(CommandHandler("request", request_command))
+    app.add_handler(CommandHandler("mypoints", mypoints_command))
+    app.add_handler(CommandHandler("grant", grant_command))
+    app.add_handler(CommandHandler("revoke", revoke_command))
+    app.add_handler(CommandHandler("users", users_command))
     app.add_handler(
         MessageHandler(
             filters.PHOTO,
