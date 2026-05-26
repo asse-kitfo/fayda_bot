@@ -1,20 +1,13 @@
 {
   "users": {
-    "8648332607": {
-      "username": "bisre1201",
-      "points": 0,
-      "unlimited": false,
-      "first_seen": 1779794209.5463042
-    },
     "402640293": {
       "username": "sonof_virginmary",
       "points": 0,
       "unlimited": true,
-      "first_seen": 1779794623.904541
+      "first_seen": 1779806834.0309753
     }
   },
   "usernames": {
-    "bisre1201": "8648332607",
     "sonof_virginmary": "402640293"
   }
 }
