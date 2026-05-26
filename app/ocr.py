@@ -906,6 +906,84 @@ def _needs_month_repair(date_str):
     return not bool(re.search(r"[A-Za-z]{3}", date_str))
 
 
+def greg_to_eth(greg_date_str):
+    """
+    Convert a Gregorian date string YYYY/Mon/DD to Ethiopian DD/MM/YYYY.
+    Returns None if conversion fails.
+    """
+    from datetime import date, timedelta
+
+    if not greg_date_str:
+        return None
+
+    MONTHS = {
+        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4,
+        "May": 5, "Jun": 6, "Jul": 7, "Aug": 8,
+        "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12
+    }
+
+    m = re.match(r"(\d{4})/([A-Za-z]{3})/(\d{2})$", greg_date_str)
+    if not m:
+        return None
+
+    greg_year = int(m.group(1))
+    greg_month = MONTHS.get(m.group(2).capitalize())
+    greg_day = int(m.group(3))
+
+    if not greg_month:
+        return None
+
+    try:
+        g_date = date(greg_year, greg_month, greg_day)
+    except ValueError:
+        return None
+
+    # Estimate Ethiopian year
+    if greg_month > 9 or (greg_month == 9 and greg_day >= 11):
+        eth_year = greg_year - 7
+    else:
+        eth_year = greg_year - 8
+
+    def _new_year(ey):
+        """Gregorian date of Ethiopian New Year for year ey."""
+        ny_greg_year = ey + 7
+        # Sep 12 if next Gregorian year is a leap year, else Sep 11
+        next_gy = ny_greg_year + 1
+        is_leap = (next_gy % 4 == 0 and
+                   (next_gy % 100 != 0 or next_gy % 400 == 0))
+        return date(ny_greg_year, 9, 12 if is_leap else 11)
+
+    new_year = _new_year(eth_year)
+    delta = (g_date - new_year).days
+
+    if delta < 0:
+        eth_year -= 1
+        new_year = _new_year(eth_year)
+        delta = (g_date - new_year).days
+
+    eth_month = delta // 30 + 1
+    eth_day   = delta % 30 + 1
+
+    if not (1 <= eth_month <= 13 and 1 <= eth_day <= 30):
+        return None
+
+    return f"{eth_day:02d}/{eth_month:02d}/{eth_year}"
+
+
+def _greg_dates_match(greg_a, greg_b):
+    """
+    Return True if two Gregorian date strings share the same year AND month.
+    Tolerates ±1 day difference so minor conversion rounding is ignored.
+    """
+    if not greg_a or not greg_b:
+        return False
+    ma = re.match(r"(\d{4})/([A-Za-z]{3})", greg_a)
+    mb = re.match(r"(\d{4})/([A-Za-z]{3})", greg_b)
+    if not ma or not mb:
+        return False
+    return ma.group(1) == mb.group(1) and ma.group(2).capitalize() == mb.group(2).capitalize()
+
+
 # =========================================================
 # AMHARIC OCR FIXES
 # =========================================================
@@ -1027,6 +1105,30 @@ def process_ocr(image_path, confirm=True, debug_dir="temp"):
         if recovered:
             print(f"🔧 Repaired dob_greg: {dob_greg!r} → {recovered!r}")
             dob_greg = recovered
+
+    # =========================================
+    # CROSS-VALIDATE dob_eth ↔ dob_greg
+    # OCR sometimes misreads a digit in the Ethiopian year
+    # (e.g. 1988 → 1968).  If the valid Gregorian date on the
+    # card disagrees with what eth_to_gregorian(dob_eth) gives,
+    # reverse-convert dob_greg back to Ethiopian to repair dob_eth.
+    # =========================================
+    if dob_greg and not _needs_month_repair(dob_greg) and dob_eth:
+        computed_greg = eth_to_gregorian(dob_eth)
+        if computed_greg and not _greg_dates_match(computed_greg, dob_greg):
+            repaired_eth = greg_to_eth(dob_greg)
+            if repaired_eth:
+                print(f"🔧 Cross-fixed dob_eth: {dob_eth!r} → {repaired_eth!r}"
+                      f" (dob_greg={dob_greg!r}, computed={computed_greg!r})")
+                dob_eth = repaired_eth
+
+    # =========================================
+    # CROSS-VALIDATE exp_eth ↔ exp_greg
+    # Same approach: if exp_eth converts to a different year/month
+    # than exp_greg, trust exp_eth (it's always numeric and clean)
+    # and leave exp_greg as already repaired above.
+    # (No reverse repair needed for exp since exp_eth is reliable.)
+    # =========================================
 
     # =========================================
     # FIX AMHARIC OCR USING ENGLISH
