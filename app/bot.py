@@ -33,15 +33,15 @@ load_dotenv()
 user_sessions = {}
 
 HELP_TEXT = (
-    "📋 *How to use this bot:*\n\n"
-    "*Step 1 —* Send a screenshot of the *FRONT* of the Fayda Digital ID card.\n"
+    "📋 <b>How to use this bot:</b>\n\n"
+    "<b>Step 1 —</b> Send a screenshot of the <b>FRONT</b> of the Fayda Digital ID card.\n"
     "The bot will extract your name, date of birth, gender, and ID number.\n\n"
-    "*Step 2 —* Send a clear *FACE PHOTO* of the person.\n"
+    "<b>Step 2 —</b> Send a clear <b>FACE PHOTO</b> of the person.\n"
     "The background will be removed automatically.\n\n"
-    "*Step 3 —* Send a screenshot of the *BACK* of the ID card.\n"
+    "<b>Step 3 —</b> Send a screenshot of the <b>BACK</b> of the ID card.\n"
     "The bot will extract the address, phone number, and QR code.\n\n"
     "✅ The bot will then generate high-quality front and back ID images.\n\n"
-    "📸 *Tips for best results:*\n"
+    "📸 <b>Tips for best results:</b>\n"
     "• Make sure the full ID is visible\n"
     "• Text should be clear and not blurry\n"
     "• No dark overlay or cropping\n"
@@ -109,8 +109,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     has_acc = access.has_access(u.id)
 
     await update.message.reply_text(
-        "👋 Welcome to the *Fayda ID Card Generator Bot!*\n\n" + HELP_TEXT,
-        parse_mode="Markdown",
+        "👋 Welcome to the <b>Fayda ID Card Generator Bot!</b>\n\n" + HELP_TEXT,
+        parse_mode="HTML",
         reply_markup=main_menu_keyboard(has_acc, pts)
     )
 
@@ -123,7 +123,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     access.register(u.id, u.username)
     await update.message.reply_text(
         HELP_TEXT,
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=reset_keyboard()
     )
 
@@ -138,8 +138,8 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     processing_users.discard(user_id)
     await update.message.reply_text(
         "🔄 Session reset.\n\n"
-        "📸 Send a new *FRONT* ID screenshot to start again.",
-        parse_mode="Markdown"
+        "📸 Send a new <b>FRONT</b> ID screenshot to start again.",
+        parse_mode="HTML"
     )
 
 
@@ -177,7 +177,7 @@ async def grant_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(args) < 2:
         await update.message.reply_text(
             "Usage: `/grant @username 10`  or  `/grant @username unlimited`",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         return
 
@@ -202,7 +202,7 @@ async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         await update.message.reply_text(
             "Usage: `/revoke @username`",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         return
 
@@ -224,7 +224,7 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         access.list_users(),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 
@@ -234,18 +234,18 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _send_points(reply_fn, user_id: int):
     pts = access.get_points(user_id)
     if pts is None:
-        await reply_fn("♾ You have *unlimited* access.", parse_mode="Markdown")
+        await reply_fn("♾ You have <b>unlimited</b> access.", parse_mode="HTML")
     elif pts == 0:
         await reply_fn(
-            "❌ You have *0 points*.\n\nUse the button below to request access.",
-            parse_mode="Markdown",
+            "❌ You have <b>0 points</b>.\n\nUse the button below to request access.",
+            parse_mode="HTML",
             reply_markup=no_access_keyboard()
         )
     else:
         await reply_fn(
-            f"🎯 You have *{pts}* point(s) remaining.\n"
+            f"🎯 You have <b>{pts}</b> point(s) remaining.\n"
             f"Each front+back generation uses 1 point.",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
 
 
@@ -259,8 +259,8 @@ async def _do_request_access(reply_fn, context, u):
 
     if pts > 0:
         await reply_fn(
-            f"✅ You already have *{pts}* point(s).",
-            parse_mode="Markdown"
+            f"✅ You already have <b>{pts}</b> point(s).",
+            parse_mode="HTML"
         )
         return
 
@@ -276,11 +276,11 @@ async def _do_request_access(reply_fn, context, u):
             await context.bot.send_message(
                 chat_id=admin_id,
                 text=(
-                    f"🔔 *New access request*\n\n"
+                    f"🔔 <b>New access request</b>\n\n"
                     f"User: @{uname}\n"
-                    f"ID: `{u.id}`"
+                    f"ID: <code>{u.id}</code>"
                 ),
-                parse_mode="Markdown",
+                parse_mode="HTML",
                 reply_markup=admin_grant_keyboard(u.id, uname)
             )
         except Exception as e:
@@ -304,7 +304,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "help":
         await query.message.reply_text(
             HELP_TEXT,
-            parse_mode="Markdown",
+            parse_mode="HTML",
             reply_markup=reset_keyboard()
         )
 
@@ -328,8 +328,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         processing_users.discard(u.id)
         await query.message.reply_text(
             "🔄 Session reset.\n\n"
-            "📸 Send a *FRONT* ID screenshot to begin.",
-            parse_mode="Markdown"
+            "📸 Send a <b>FRONT</b> ID screenshot to begin.",
+            parse_mode="HTML"
         )
 
     # -------------------------------------------------------
@@ -362,13 +362,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # notify the user
         try:
             if amount == "unlimited":
-                user_msg = "🎉 Your access has been *granted* — you now have *unlimited* access!\n\nSend a FRONT ID screenshot to begin."
+                user_msg = "🎉 Your access has been <b>granted</b> — you now have <b>unlimited</b> access!\n\nSend a FRONT ID screenshot to begin."
             else:
-                user_msg = f"🎉 Your access has been *granted* — you now have *{amount}* point(s)!\n\nSend a FRONT ID screenshot to begin."
+                user_msg = f"🎉 Your access has been <b>granted</b> — you now have <b>{amount}</b> point(s)!\n\nSend a FRONT ID screenshot to begin."
             await context.bot.send_message(
                 chat_id=int(target_uid),
                 text=user_msg,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         except Exception as e:
             print(f"⚠️ Could not notify user {target_uid}: {e}")
@@ -554,8 +554,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text(
                 "✅ Front data extracted.\n\n"
-                "📸 Now send the *face photo* of the person.",
-                parse_mode="Markdown",
+                "📸 Now send the <b>face photo</b> of the person.",
+                parse_mode="HTML",
                 reply_markup=reset_keyboard()
             )
             return
@@ -619,8 +619,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply(
                 update.message.reply_text,
                 "✅ Front ID generated.\n\n"
-                "📸 Now send the *BACK* screenshot of the ID card.",
-                parse_mode="Markdown",
+                "📸 Now send the <b>BACK</b> screenshot of the ID card.",
+                parse_mode="HTML",
                 reply_markup=reset_keyboard()
             )
             return
@@ -722,14 +722,14 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if pts is None:
                 pts_line = "♾ Unlimited access remaining."
             elif pts == 0:
-                pts_line = "⚠️ You have *0 points* left. Use the button below to request more."
+                pts_line = "⚠️ You have <b>0 points</b> left. Use the button below to request more."
             else:
-                pts_line = f"🎯 You have *{pts}* point(s) remaining."
+                pts_line = f"🎯 You have <b>{pts}</b> point(s) remaining."
 
             await safe_reply(
                 update.message.reply_text,
                 f"✅ Back ID generated. All done!\n\n{pts_line}",
-                parse_mode="Markdown",
+                parse_mode="HTML",
                 reply_markup=done_keyboard()
             )
             return
@@ -741,8 +741,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_reply(
                 update.message.reply_text,
                 "⚠️ Front already generated.\n\n"
-                "📸 Please send the *BACK* ID screenshot.",
-                parse_mode="Markdown",
+                "📸 Please send the <b>BACK</b> ID screenshot.",
+                parse_mode="HTML",
                 reply_markup=reset_keyboard()
             )
             return
