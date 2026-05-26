@@ -150,6 +150,20 @@ def revoke(target_username: str) -> str:
 
 
 # =========================================================
+# ADMIN: GET TELEGRAM USER IDs (for DM notifications)
+# =========================================================
+def get_admin_ids() -> list[int]:
+    """Return the numeric Telegram user IDs of all known admins."""
+    data = _load()
+    ids = []
+    for uname in ADMINS:
+        uid_str = data["usernames"].get(uname)
+        if uid_str:
+            ids.append(int(uid_str))
+    return ids
+
+
+# =========================================================
 # ADMIN: LIST USERS
 # =========================================================
 def list_users() -> str:

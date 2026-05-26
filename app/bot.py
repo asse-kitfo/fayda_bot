@@ -112,6 +112,25 @@ async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     print(f"🔔 ACCESS REQUEST from @{uname} (id={u.id})")
 
+    # Notify every known admin via DM
+    admin_ids = access.get_admin_ids()
+    for admin_id in admin_ids:
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=(
+                    f"🔔 *New access request*\n\n"
+                    f"User: @{uname}\n"
+                    f"ID: `{u.id}`\n\n"
+                    f"Reply with:\n"
+                    f"`/grant @{uname} 10`  — give 10 points\n"
+                    f"`/grant @{uname} unlimited`  — unlimited access"
+                ),
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            print(f"⚠️ Could not notify admin {admin_id}: {e}")
+
 # =========================================================
 # MYPOINTS COMMAND
 # =========================================================
