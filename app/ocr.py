@@ -829,6 +829,84 @@ def confirm_dates(data):
         "issues": exp_warnings
     }
 # =========================================================
+# ETHIOPIAN → GREGORIAN DATE CONVERTER
+# used to repair garbled Gregorian month names
+# =========================================================
+def eth_to_gregorian(eth_date_str):
+    """
+    Convert an Ethiopian date (DD/MM/YYYY or YYYY/MM/DD) to a
+    Gregorian date string in YYYY/Mon/DD format.
+    Returns None if conversion fails.
+    """
+    from datetime import date, timedelta
+
+    if not eth_date_str:
+        return None
+
+    eth_date_str = re.sub(r"\s+", "", eth_date_str)
+
+    # detect format
+    m4 = re.match(r"(\d{4})/(\d{2})/(\d{2})$", eth_date_str)
+    m2 = re.match(r"(\d{2})/(\d{2})/(\d{4})$", eth_date_str)
+
+    if m4:
+        eth_year, eth_month, eth_day = (
+            int(m4.group(1)), int(m4.group(2)), int(m4.group(3))
+        )
+    elif m2:
+        eth_day, eth_month, eth_year = (
+            int(m2.group(1)), int(m2.group(2)), int(m2.group(3))
+        )
+    else:
+        return None
+
+    if not (1 <= eth_month <= 13 and 1 <= eth_day <= 30):
+        return None
+
+    MONTH_ABBREVS = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ]
+
+    # Ethiopian month 1 (Meskerem) starts Sep 11 of Gregorian year Eth+7
+    # Months 1-4 fall in Gregorian year Eth+7; months 5-13 in Eth+8
+    ETH_MONTH_START = {
+        1:  (9,  11),
+        2:  (10, 11),
+        3:  (11, 10),
+        4:  (12, 10),
+        5:  (1,   9),
+        6:  (2,   8),
+        7:  (3,  10),
+        8:  (4,   9),
+        9:  (5,   9),
+        10: (6,   8),
+        11: (7,   8),
+        12: (8,   7),
+        13: (9,   6),
+    }
+
+    greg_month_start, greg_day_start = ETH_MONTH_START[eth_month]
+    greg_year = eth_year + 7 if eth_month <= 4 else eth_year + 8
+
+    try:
+        start = date(greg_year, greg_month_start, greg_day_start)
+        greg = start + timedelta(days=eth_day - 1)
+        abbrev = MONTH_ABBREVS[greg.month - 1]
+        return f"{greg.year}/{abbrev}/{greg.day:02d}"
+    except Exception:
+        return None
+
+
+def _needs_month_repair(date_str):
+    """Return True if date string has a garbled (non-Latin) month."""
+    if not date_str:
+        return True
+    # valid Gregorian looks like YYYY/Mon/DD or DD/Mon/YYYY
+    return not bool(re.search(r"[A-Za-z]{3}", date_str))
+
+
+# =========================================================
 # AMHARIC OCR FIXES
 # =========================================================
 def fix_amharic_from_english(name_en, name_am):
@@ -930,6 +1008,26 @@ def process_ocr(image_path, confirm=True, debug_dir="temp"):
 
     if crop_name_am:
         name_am = crop_name_am
+
+    # =========================================
+    # REPAIR GARBLED GREGORIAN MONTHS
+    # OCR often garbles Latin month names (e.g. May→እ48ሃ)
+    # when Amharic+English mode confuses scripts.
+    # Use the clean numeric Ethiopian date to derive
+    # the correct Gregorian month via calendar conversion.
+    # =========================================
+    if _needs_month_repair(exp_greg) and exp_eth:
+        recovered = eth_to_gregorian(exp_eth)
+        if recovered:
+            print(f"🔧 Repaired exp_greg: {exp_greg!r} → {recovered!r}")
+            exp_greg = recovered
+
+    if _needs_month_repair(dob_greg) and dob_eth:
+        recovered = eth_to_gregorian(dob_eth)
+        if recovered:
+            print(f"🔧 Repaired dob_greg: {dob_greg!r} → {recovered!r}")
+            dob_greg = recovered
+
     # =========================================
     # FIX AMHARIC OCR USING ENGLISH
     # =========================================
