@@ -267,8 +267,14 @@ def extract_face(image_path):
     largest = max(faces, key=lambda f: f[2] * f[3])
     fx, fy, fw, fh = largest
 
-    pad_x = int(fw * 0.45)
-    pad_y = int(fh * 0.55)
+    pad_left  = int(fw * 0.45)
+    pad_right = int(fw * 0.45)
+    # Asymmetric vertical padding:
+    #   top   — generous, to include the full crown of the head
+    #   bottom — restrained, to avoid grabbing the QR code or other
+    #            content that sits below the face on the ID screenshot
+    pad_top    = int(fh * 0.60)
+    pad_bottom = int(fh * 0.22)
 
     # Always translate coordinates back to the FULL image before clamping.
     # Using source_img (a cropped region) as the clamp boundary loses
@@ -277,10 +283,10 @@ def extract_face(image_path):
     full_fx = fx + offset_x
     full_fy = fy + offset_y
 
-    sx1 = max(0, full_fx - pad_x)
-    sy1 = max(0, full_fy - pad_y)
-    sx2 = min(img.shape[1], full_fx + fw + pad_x)
-    sy2 = min(img.shape[0], full_fy + fh + pad_y)
+    sx1 = max(0, full_fx - pad_left)
+    sy1 = max(0, full_fy - pad_top)
+    sx2 = min(img.shape[1], full_fx + fw + pad_right)
+    sy2 = min(img.shape[0], full_fy + fh + pad_bottom)
 
     final_face = img[sy1:sy2, sx1:sx2]
     final_face = cv2.cvtColor(final_face, cv2.COLOR_BGR2RGB)
