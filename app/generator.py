@@ -269,27 +269,24 @@ def extract_face(image_path):
 
     pad_left  = int(fw * 0.45)
     pad_right = int(fw * 0.45)
-    # Asymmetric vertical padding:
-    #   top    — generous, to include the full crown of the head
-    #   bottom — generous for the chest/shoulders, but hard-capped at
-    #            52 % of the image height so the QR code region (lower
-    #            half of the ID screenshot) can never be included.
-    pad_top    = int(fh * 0.60)
+    pad_top   = int(fh * 0.60)
+    # Bottom: face-relative cap — at most 1.1× face-height below the chin.
+    # This scales with face size so it captures neck + chest without ever
+    # reaching the white gap or QR code that appear below the face photo
+    # on the ID card screenshot.
     pad_bottom = int(fh * 0.55)
 
     # Always translate coordinates back to the FULL image before clamping.
-    # Using source_img (a cropped region) as the clamp boundary loses
-    # padding when the face sits near the region edge — that's what caused
-    # the top/right/bottom of the photo to appear cut.
     full_fx = fx + offset_x
     full_fy = fy + offset_y
 
     sx1 = max(0, full_fx - pad_left)
     sy1 = max(0, full_fy - pad_top)
     sx2 = min(img.shape[1], full_fx + fw + pad_right)
-    # Hard cap: never go below 48 % of image height to avoid QR code
-    qr_safe_limit = int(img.shape[0] * 0.48)
-    sy2 = min(qr_safe_limit, full_fy + fh + pad_bottom)
+    # Face-relative bottom cap: top-of-face + 2.1 × face heights.
+    # Keeps the crop strictly within the face-photo region of the ID card.
+    face_relative_limit = full_fy + int(fh * 2.1)
+    sy2 = min(img.shape[0], full_fy + fh + pad_bottom, face_relative_limit)
 
     final_face = img[sy1:sy2, sx1:sx2]
     final_face = cv2.cvtColor(final_face, cv2.COLOR_BGR2RGB)
