@@ -998,7 +998,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================================================
 def main():
 
-    TOKEN = os.getenv("BOT_TOKEN")
+    TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN")
 
     app = (
         ApplicationBuilder()
