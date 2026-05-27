@@ -406,6 +406,95 @@ async def setpreview_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 # =========================================================
+# ADDTEMPLATE COMMAND (admin only)
+# Usage: send a TIF document with caption:
+#   /addtemplate b front   → saves as assets/templates/front_b.tif
+#   /addtemplate b back    → saves as assets/templates/back_b.tif
+# Or reply to a document message with the same caption.
+# Template A is the default (front.tif / back.tif).
+# All templates share the same coords.json / back_coords.json.
+# =========================================================
+async def addtemplate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = update.message.from_user
+    access.register(u.id, u.username)
+
+    if not access.is_admin(u.id, u.username):
+        await update.message.reply_text("❌ Admin only.")
+        return
+
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            "📋 <b>Usage:</b>\n\n"
+            "Send a <code>.tif</code> file with caption:\n"
+            "<code>/addtemplate b front</code> — adds front template B\n"
+            "<code>/addtemplate b back</code>  — adds back template B\n\n"
+            "Or reply to a document with the same command.\n\n"
+            "<b>Valid letters:</b> b, c, d, e, f, g, h, i, j, k, l, m, n, o, p\n"
+            "<b>All templates share the same layout coords.</b>",
+            parse_mode="HTML"
+        )
+        return
+
+    letter = args[0].lower().strip()
+    side   = args[1].lower().strip()
+
+    if letter not in list("bcdefghijklmnop"):
+        await update.message.reply_text("❌ Invalid letter. Use b–p (template A already exists).")
+        return
+
+    if side not in ("front", "back"):
+        await update.message.reply_text("❌ Side must be <code>front</code> or <code>back</code>.", parse_mode="HTML")
+        return
+
+    # Get the document — from this message or a replied-to message
+    doc = None
+    if update.message.document:
+        doc = update.message.document
+    elif update.message.reply_to_message and update.message.reply_to_message.document:
+        doc = update.message.reply_to_message.document
+
+    if not doc:
+        await update.message.reply_text(
+            "📎 Please attach a <code>.tif</code> file to your message,\n"
+            "or reply to a document with this command.",
+            parse_mode="HTML"
+        )
+        return
+
+    filename = (doc.file_name or "").lower()
+    if not (filename.endswith(".tif") or filename.endswith(".tiff")):
+        await update.message.reply_text("❌ File must be a <code>.tif</code> or <code>.tiff</code> file.", parse_mode="HTML")
+        return
+
+    await update.message.reply_text(f"⏳ Saving {side} template {letter.upper()}...")
+
+    dest_name = f"front_{letter}.tif" if side == "front" else f"back_{letter}.tif"
+    dest_path = os.path.join("assets", "templates", dest_name)
+
+    file = await doc.get_file()
+    await file.download_to_drive(dest_path)
+
+    # Verify it's a valid image
+    try:
+        from PIL import Image as _Img
+        with _Img.open(dest_path) as _test:
+            w, h = _test.size
+    except Exception as e:
+        os.remove(dest_path)
+        await update.message.reply_text(f"❌ Could not open the file as an image: {e}")
+        return
+
+    available = get_available_templates()
+    await update.message.reply_text(
+        f"✅ <b>Template {letter.upper()} {side}</b> saved ({w}×{h}px).\n\n"
+        f"📋 Available templates now: {', '.join(t.upper() for t in available)}\n\n"
+        f"Users can select it via <b>Choose Template</b> in the menu.",
+        parse_mode="HTML"
+    )
+
+
+# =========================================================
 # SHARED HELPERS
 # =========================================================
 async def _send_points(reply_fn, user_id: int):
@@ -1101,7 +1190,8 @@ def main():
     app.add_handler(CommandHandler("users",      users_command))
     app.add_handler(CommandHandler("status",     status_command))
     app.add_handler(CommandHandler("broadcast",  broadcast_command))
-    app.add_handler(CommandHandler("setpreview", setpreview_command))
+    app.add_handler(CommandHandler("setpreview",   setpreview_command))
+    app.add_handler(CommandHandler("addtemplate",  addtemplate_command))
 
     app.add_handler(CallbackQueryHandler(handle_callback))
 

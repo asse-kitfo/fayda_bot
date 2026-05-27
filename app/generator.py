@@ -617,10 +617,10 @@ def place_photo_copy(template, face, layout):
 # =========================================================
 def generate_id(data, image_path, output_path, debug_dir="temp", template_id="a"):
 
-    # Template A → legacy front.tif / coords.json
-    # Template B+ → front_b.tif / coords_b.json etc.
-    tpl_file    = "front.tif"    if template_id == "a" else f"front_{template_id}.tif"
-    coords_file = "coords.json"  if template_id == "a" else f"coords_{template_id}.json"
+    # Template A → front.tif / Template B+ → front_b.tif etc.
+    # All templates share the same coords.json
+    tpl_file    = "front.tif" if template_id == "a" else f"front_{template_id}.tif"
+    coords_file = "coords.json"
 
     template = Image.open(path("assets", "templates", tpl_file))
     draw = ImageDraw.Draw(template)

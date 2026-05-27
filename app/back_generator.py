@@ -164,10 +164,10 @@ def generate_card_number():
 # =========================================================
 def generate_back(data, qr_crop, output_path, name="unknown", template_id="a"):
 
-    # Template A → legacy back.tif / back_coords.json
-    # Template B+ → back_b.tif / back_coords_b.json etc.
-    tpl_file    = "back.tif"           if template_id == "a" else f"back_{template_id}.tif"
-    coords_file = "back_coords.json"   if template_id == "a" else f"back_coords_{template_id}.json"
+    # Template A → back.tif / Template B+ → back_b.tif etc.
+    # All templates share the same back_coords.json
+    tpl_file    = "back.tif" if template_id == "a" else f"back_{template_id}.tif"
+    coords_file = "back_coords.json"
 
     card_number = generate_card_number()
     # coords
