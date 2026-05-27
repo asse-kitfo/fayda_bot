@@ -399,9 +399,17 @@ async def setpreview_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await file.download_to_drive(tmp_path)
 
-    from PIL import Image as _Img
-    img = _Img.open(tmp_path).convert("RGB")
-    img.save(final_path, "JPEG", quality=92)
+    from PIL import Image as _Img, ImageCms as _Cms
+    import io as _io
+    img = _Img.open(tmp_path)
+    icc = img.info.get("icc_profile")
+    if img.mode == "CMYK" and icc:
+        src_profile = _Cms.ImageCmsProfile(_io.BytesIO(icc))
+        dst_profile = _Cms.createProfile("sRGB")
+        img = _Cms.profileToProfile(img, src_profile, dst_profile, outputMode="RGB")
+    elif img.mode != "RGB":
+        img = img.convert("RGB")
+    img.save(final_path, "JPEG", quality=95)
     os.remove(tmp_path)
 
     await update.message.reply_photo(
