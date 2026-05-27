@@ -168,6 +168,19 @@ def set_template(user_id: int, template_id: str):
         _save(data)
 
 
+def reassign_template(from_tid: str, to_tid: str) -> int:
+    """Move all users on from_tid to to_tid. Returns count of affected users."""
+    data = _load()
+    count = 0
+    for u in data["users"].values():
+        if u.get("template", "a") == from_tid:
+            u["template"] = to_tid
+            count += 1
+    if count:
+        _save(data)
+    return count
+
+
 # =========================================================
 # ADMIN: GET TELEGRAM USER IDs (for DM notifications)
 # =========================================================

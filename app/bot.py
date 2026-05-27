@@ -2,7 +2,7 @@ import os
 import uuid
 
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -366,6 +366,16 @@ async def setpreview_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("❌ Admin only.")
         return
 
+    # Determine side: /setpreview front  or  /setpreview back  (default = front)
+    args = context.args
+    side = (args[0].lower() if args else "front")
+    if side not in ("front", "back"):
+        await update.message.reply_text(
+            "Usage: send a photo with caption <code>/setpreview front</code> or <code>/setpreview back</code>.",
+            parse_mode="HTML"
+        )
+        return
+
     # Photo can be in the command message itself or the replied-to message
     photo = None
     if update.message.photo:
@@ -375,21 +385,20 @@ async def setpreview_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if not photo:
         await update.message.reply_text(
-            "📸 Send a photo with caption <code>/setpreview</code>, "
-            "or reply to a photo with <code>/setpreview</code>.",
+            f"📸 Send a photo with caption <code>/setpreview {side}</code>, "
+            f"or reply to a photo with <code>/setpreview {side}</code>.",
             parse_mode="HTML"
         )
         return
 
-    await update.message.reply_text("⏳ Saving preview image...")
+    await update.message.reply_text(f"⏳ Saving {side} preview image...")
 
     file = await photo.get_file()
-    tmp_path = "assets/template_sample_tmp.jpg"
-    final_path = "assets/template_sample.jpg"
+    tmp_path  = f"assets/template_sample_{side}_tmp.jpg"
+    final_path = f"assets/template_sample_{side}.jpg"
 
     await file.download_to_drive(tmp_path)
 
-    # Convert to JPEG cleanly (handles PNG, WEBP, etc.)
     from PIL import Image as _Img
     img = _Img.open(tmp_path).convert("RGB")
     img.save(final_path, "JPEG", quality=92)
@@ -398,8 +407,8 @@ async def setpreview_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_photo(
         photo=open(final_path, "rb"),
         caption=(
-            "✅ <b>Template preview updated!</b>\n\n"
-            "All users will now see this image when they tap <b>Choose Template</b>."
+            f"✅ <b>Template {side} preview updated!</b>\n\n"
+            "Users will see this when they tap <b>Choose Template</b>."
         ),
         parse_mode="HTML"
     )
@@ -490,6 +499,63 @@ async def addtemplate_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"✅ <b>Template {letter.upper()} {side}</b> saved ({w}×{h}px).\n\n"
         f"📋 Available templates now: {', '.join(t.upper() for t in available)}\n\n"
         f"Users can select it via <b>Choose Template</b> in the menu.",
+        parse_mode="HTML"
+    )
+
+
+# =========================================================
+# REMOVETEMPLATE COMMAND (admin only)
+# Usage: /removetemplate b
+# Deletes front_b.tif and back_b.tif, reassigns users to template A
+# =========================================================
+async def removetemplate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = update.message.from_user
+    access.register(u.id, u.username)
+
+    if not access.is_admin(u.id, u.username):
+        await update.message.reply_text("❌ Admin only.")
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Usage: <code>/removetemplate b</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    letter = args[0].lower().strip()
+    if letter == "a":
+        await update.message.reply_text("❌ Cannot remove Template A — it is the default.")
+        return
+    if letter not in list("bcdefghijklmnop"):
+        await update.message.reply_text("❌ Invalid letter. Use b–p.")
+        return
+
+    front_path = os.path.join("assets", "templates", f"front_{letter}.tif")
+    back_path  = os.path.join("assets", "templates", f"back_{letter}.tif")
+
+    removed = []
+    if os.path.exists(front_path):
+        os.remove(front_path)
+        removed.append(f"front_{letter}.tif")
+    if os.path.exists(back_path):
+        os.remove(back_path)
+        removed.append(f"back_{letter}.tif")
+
+    if not removed:
+        await update.message.reply_text(f"⚠️ Template {letter.upper()} files not found — nothing to remove.")
+        return
+
+    # Reassign any users on this template back to A
+    affected = access.reassign_template(letter, "a")
+
+    available = get_available_templates()
+    await update.message.reply_text(
+        f"🗑️ <b>Template {letter.upper()} removed.</b>\n\n"
+        f"Deleted: {', '.join(removed)}\n"
+        f"Users reassigned to Template A: <b>{affected}</b>\n\n"
+        f"Remaining templates: {', '.join(t.upper() for t in available)}",
         parse_mode="HTML"
     )
 
@@ -627,26 +693,37 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("🔒 You need access to choose a template.")
             return
         current_tid = access.get_template(u.id)
-        sample_path = "assets/template_sample.jpg"
-        caption = (
+        front_path = "assets/template_sample_front.jpg"
+        back_path  = "assets/template_sample_back.jpg"
+
+        header = (
             "🎨 <b>Choose a Template</b>\n\n"
-            f"Your current template: <b>Template {current_tid.upper()}</b>\n\n"
+            f"Current: <b>Template {current_tid.upper()}</b>\n"
             "Tap a template below to set it as your default:"
         )
-        if os.path.exists(sample_path):
-            with open(sample_path, "rb") as f:
-                await query.message.reply_photo(
-                    photo=f,
-                    caption=caption,
-                    parse_mode="HTML",
-                    reply_markup=template_keyboard(current_tid)
-                )
-        else:
+
+        media = []
+        open_files = []
+        if os.path.exists(front_path):
+            fh = open(front_path, "rb")
+            open_files.append(fh)
+            media.append(InputMediaPhoto(media=fh, caption="🪪 Front side"))
+        if os.path.exists(back_path):
+            bh = open(back_path, "rb")
+            open_files.append(bh)
+            media.append(InputMediaPhoto(media=bh, caption="🪪 Back side"))
+
+        try:
+            if media:
+                await query.message.reply_media_group(media=media)
             await query.message.reply_text(
-                caption,
+                header,
                 parse_mode="HTML",
                 reply_markup=template_keyboard(current_tid)
             )
+        finally:
+            for fh in open_files:
+                fh.close()
 
     # -------------------------------------------------------
     # TEMPLATE SELECTION
@@ -1190,8 +1267,9 @@ def main():
     app.add_handler(CommandHandler("users",      users_command))
     app.add_handler(CommandHandler("status",     status_command))
     app.add_handler(CommandHandler("broadcast",  broadcast_command))
-    app.add_handler(CommandHandler("setpreview",   setpreview_command))
-    app.add_handler(CommandHandler("addtemplate",  addtemplate_command))
+    app.add_handler(CommandHandler("setpreview",     setpreview_command))
+    app.add_handler(CommandHandler("addtemplate",   addtemplate_command))
+    app.add_handler(CommandHandler("removetemplate", removetemplate_command))
 
     app.add_handler(CallbackQueryHandler(handle_callback))
 
