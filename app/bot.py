@@ -36,7 +36,7 @@ ADMIN_USERNAME = next(iter(access.ADMINS), "admin")
 
 WELCOME_TEXT = (
     "👋 Welcome to the <b>Fayda ID Card Generator Bot!</b>\n\n"
-    "This bot generates high-quality Fayda Digital ID card images from your screenshots.\n\n"
+    "This bot generates high-quality, print-ready Fayda Digital ID card from your screenshots.\n\n"
     "📞 Need help or access?\n"
     f"Contact the admin: @{ADMIN_USERNAME}"
 )
