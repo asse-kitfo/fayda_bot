@@ -173,7 +173,7 @@ def list_users() -> str:
     if not users:
         return "📋 No registered users yet."
 
-    lines = ["📋 *Registered users:*\n"]
+    lines = ["📋 <b>Registered users:</b>\n"]
     for uid, u in sorted(users.items(), key=lambda x: x[1].get("first_seen", 0)):
         uname = u.get("username") or uid
         if u.get("unlimited"):
@@ -182,5 +182,46 @@ def list_users() -> str:
             pts = u.get("points", 0)
             status = f"{pts} pt(s)"
         lines.append(f"• @{uname} — {status}")
+
+    return "\n".join(lines)
+
+
+# =========================================================
+# ADMIN: STATUS DASHBOARD
+# =========================================================
+def get_status() -> str:
+    data = _load()
+    users = data["users"]
+
+    total      = len(users)
+    unlimited  = sum(1 for u in users.values() if u.get("unlimited"))
+    with_pts   = sum(1 for u in users.values() if not u.get("unlimited") and u.get("points", 0) > 0)
+    no_access  = sum(1 for u in users.values() if not u.get("unlimited") and u.get("points", 0) == 0)
+    total_pts  = sum(u.get("points", 0) for u in users.values() if not u.get("unlimited"))
+
+    lines = [
+        "📊 <b>Bot Status Dashboard</b>\n",
+        f"👥 Total users:     <b>{total}</b>",
+        f"♾  Unlimited:       <b>{unlimited}</b>",
+        f"🎯 Has points:      <b>{with_pts}</b>",
+        f"❌ No access:       <b>{no_access}</b>",
+        f"💰 Points in pool:  <b>{total_pts}</b>",
+        "",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "<b>User breakdown:</b>",
+    ]
+
+    sorted_users = sorted(users.items(), key=lambda x: x[1].get("first_seen", 0), reverse=True)
+    for uid, u in sorted_users[:30]:
+        uname = u.get("username") or uid
+        if u.get("unlimited"):
+            badge = "♾"
+        else:
+            pts = u.get("points", 0)
+            badge = f"{pts}pt" if pts > 0 else "❌"
+        lines.append(f"• @{uname} — {badge}")
+
+    if total > 30:
+        lines.append(f"  <i>...and {total - 30} more. Use /users for full list.</i>")
 
     return "\n".join(lines)

@@ -90,12 +90,19 @@ def reset_keyboard() -> InlineKeyboardMarkup:
 
 def admin_grant_keyboard(user_id: int, username: str) -> InlineKeyboardMarkup:
     uname = username or str(user_id)
+    uid   = user_id
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Grant 10 pts", callback_data=f"admin_grant_{user_id}_10"),
-            InlineKeyboardButton("♾ Unlimited",    callback_data=f"admin_grant_{user_id}_unlimited"),
+            InlineKeyboardButton("5 pts",   callback_data=f"admin_grant_{uid}_5"),
+            InlineKeyboardButton("10 pts",  callback_data=f"admin_grant_{uid}_10"),
+            InlineKeyboardButton("20 pts",  callback_data=f"admin_grant_{uid}_20"),
         ],
-        [InlineKeyboardButton("❌ Deny", callback_data=f"admin_deny_{user_id}_{uname}")],
+        [
+            InlineKeyboardButton("50 pts",  callback_data=f"admin_grant_{uid}_50"),
+            InlineKeyboardButton("100 pts", callback_data=f"admin_grant_{uid}_100"),
+            InlineKeyboardButton("♾ Unlimited", callback_data=f"admin_grant_{uid}_unlimited"),
+        ],
+        [InlineKeyboardButton("❌ Deny", callback_data=f"admin_deny_{uid}_{uname}")],
     ])
 
 
@@ -224,6 +231,23 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         access.list_users(),
+        parse_mode="HTML"
+    )
+
+
+# =========================================================
+# STATUS COMMAND (admin only)
+# =========================================================
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = update.message.from_user
+    access.register(u.id, u.username)
+
+    if not access.is_admin(u.id, u.username):
+        await update.message.reply_text("❌ Admin only.")
+        return
+
+    await update.message.reply_text(
+        access.get_status(),
         parse_mode="HTML"
     )
 
@@ -800,6 +824,7 @@ def main():
     app.add_handler(CommandHandler("grant",    grant_command))
     app.add_handler(CommandHandler("revoke",   revoke_command))
     app.add_handler(CommandHandler("users",    users_command))
+    app.add_handler(CommandHandler("status",   status_command))
 
     app.add_handler(CallbackQueryHandler(handle_callback))
 
