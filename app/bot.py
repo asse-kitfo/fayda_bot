@@ -354,6 +354,58 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================================================
+# SETPREVIEW COMMAND (admin only)
+# Send a photo with caption /setpreview  OR
+# reply to a photo with /setpreview
+# =========================================================
+async def setpreview_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = update.message.from_user
+    access.register(u.id, u.username)
+
+    if not access.is_admin(u.id, u.username):
+        await update.message.reply_text("❌ Admin only.")
+        return
+
+    # Photo can be in the command message itself or the replied-to message
+    photo = None
+    if update.message.photo:
+        photo = update.message.photo[-1]
+    elif update.message.reply_to_message and update.message.reply_to_message.photo:
+        photo = update.message.reply_to_message.photo[-1]
+
+    if not photo:
+        await update.message.reply_text(
+            "📸 Send a photo with caption <code>/setpreview</code>, "
+            "or reply to a photo with <code>/setpreview</code>.",
+            parse_mode="HTML"
+        )
+        return
+
+    await update.message.reply_text("⏳ Saving preview image...")
+
+    file = await photo.get_file()
+    tmp_path = "assets/template_sample_tmp.jpg"
+    final_path = "assets/template_sample.jpg"
+
+    await file.download_to_drive(tmp_path)
+
+    # Convert to JPEG cleanly (handles PNG, WEBP, etc.)
+    from PIL import Image as _Img
+    img = _Img.open(tmp_path).convert("RGB")
+    img.save(final_path, "JPEG", quality=92)
+    os.remove(tmp_path)
+
+    await update.message.reply_photo(
+        photo=open(final_path, "rb"),
+        caption=(
+            "✅ <b>Template preview updated!</b>\n\n"
+            "All users will now see this image when they tap <b>Choose Template</b>."
+        ),
+        parse_mode="HTML"
+    )
+
+
+# =========================================================
 # SHARED HELPERS
 # =========================================================
 async def _send_points(reply_fn, user_id: int):
@@ -1046,9 +1098,10 @@ def main():
     app.add_handler(CommandHandler("mypoints", mypoints_command))
     app.add_handler(CommandHandler("grant",    grant_command))
     app.add_handler(CommandHandler("revoke",   revoke_command))
-    app.add_handler(CommandHandler("users",     users_command))
-    app.add_handler(CommandHandler("status",    status_command))
-    app.add_handler(CommandHandler("broadcast", broadcast_command))
+    app.add_handler(CommandHandler("users",      users_command))
+    app.add_handler(CommandHandler("status",     status_command))
+    app.add_handler(CommandHandler("broadcast",  broadcast_command))
+    app.add_handler(CommandHandler("setpreview", setpreview_command))
 
     app.add_handler(CallbackQueryHandler(handle_callback))
 
