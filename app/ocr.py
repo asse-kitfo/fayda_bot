@@ -1162,14 +1162,15 @@ def process_ocr(image_path, confirm=True, debug_dir="temp"):
         from datetime import date as _date, timedelta as _timedelta
         _ABBREVS = ["Jan","Feb","Mar","Apr","May","Jun",
                     "Jul","Aug","Sep","Oct","Nov","Dec"]
-        _issue   = _date.today() - _timedelta(days=2)
-        _exp_year = _issue.year + 8
-        _abbrev   = _ABBREVS[_issue.month - 1]
-        _calc_greg = f"{_exp_year}/{_abbrev}/{_issue.day:02d}"
+        _today   = _date.today()
+        _exp_base = _today - _timedelta(days=2)
+        _exp_year = _exp_base.year + 8
+        _abbrev   = _ABBREVS[_exp_base.month - 1]
+        _calc_greg = f"{_exp_year}/{_abbrev}/{_exp_base.day:02d}"
         _calc_eth  = greg_to_eth(_calc_greg) or ""
         data["exp_greg"] = _calc_greg
         data["exp_eth"]  = _calc_eth
-        print(f"ℹ️  No exp date — issue date={_issue}, auto-calculated: Greg={_calc_greg}, Eth={_calc_eth}")
+        print(f"ℹ️  No exp date — issue={_today}, exp base={_exp_base}, auto-calculated: Greg={_calc_greg}, Eth={_calc_eth}")
 
     # =========================================
     # VALIDATION
