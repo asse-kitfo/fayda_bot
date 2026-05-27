@@ -1027,8 +1027,11 @@ def main():
         MessageHandler(filters.PHOTO, handle_image)
     )
 
+    async def _cleanup_job(context):
+        cleanup_old_dirs(30)
+
     app.job_queue.run_repeating(
-        lambda *_: cleanup_old_dirs(30),
+        _cleanup_job,
         interval=600,
         first=600
     )
