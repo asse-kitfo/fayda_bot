@@ -795,20 +795,21 @@ def confirm_dates(data):
         issues.append("DOB Ethiopian is invalid")
 
     # =====================================================
-    # EXP (warning only — completely absent = no warning)
+    # EXP GREG (warning only — garbled month shouldn't block)
     # =====================================================
     exp_greg = data.get("exp_greg", "")
-    exp_eth  = data.get("exp_eth",  "")
     exp_warnings = []
 
-    if not exp_greg and not exp_eth:
-        # Card has no expiry date field — perfectly valid, skip checks
-        print("ℹ️  No exp date on card — skipping exp validation")
-    else:
-        if exp_greg and (suspicious(exp_greg) or not is_date(exp_greg)):
-            exp_warnings.append("EXP Gregorian is invalid")
-        if exp_eth and (suspicious(exp_eth) or not is_date(exp_eth)):
-            exp_warnings.append("EXP Ethiopian is invalid")
+    if suspicious(exp_greg) or not is_date(exp_greg):
+        exp_warnings.append("EXP Gregorian is invalid")
+
+    # =====================================================
+    # EXP ETH (warning only)
+    # =====================================================
+    exp_eth = data.get("exp_eth", "")
+
+    if suspicious(exp_eth) or not is_date(exp_eth):
+        exp_warnings.append("EXP Ethiopian is invalid")
 
     # =====================================================
     # RESULT
@@ -1034,8 +1035,15 @@ def fix_amharic_from_english(name_en, name_am):
 
             am_word = am_word.replace("ሪ", "ራ")
 
-        return am_word
+        # =================================================
+        # RULE 4:
+        # if English contains "fi"
+        # and Amharic doesn't contain "ፊ"
+        # =================================================
+        if "fi" in en_word and "ፊ" not in am_word:
+            am_word = am_word.replace("ፌ", "ፊ")
 
+        return am_word
     # =====================================================
     # POSITIONAL ALIGNMENT
     # first ↔ first
@@ -1153,24 +1161,6 @@ def process_ocr(image_path, confirm=True, debug_dir="temp"):
         "exp_eth": exp_eth,
         "fan": fan
     }
-
-    # =========================================
-    # AUTO-CALCULATE EXP IF ABSENT
-    # Issue date = today, exp = today + 8 years
-    # =========================================
-    if not data.get("exp_greg") and not data.get("exp_eth"):
-        from datetime import date as _date, timedelta as _timedelta
-        _ABBREVS = ["Jan","Feb","Mar","Apr","May","Jun",
-                    "Jul","Aug","Sep","Oct","Nov","Dec"]
-        _today   = _date.today()
-        _exp_base = _today - _timedelta(days=2)
-        _exp_year = _exp_base.year + 8
-        _abbrev   = _ABBREVS[_exp_base.month - 1]
-        _calc_greg = f"{_exp_year}/{_abbrev}/{_exp_base.day:02d}"
-        _calc_eth  = greg_to_eth(_calc_greg) or ""
-        data["exp_greg"] = _calc_greg
-        data["exp_eth"]  = _calc_eth
-        print(f"ℹ️  No exp date — issue={_today}, exp base={_exp_base}, auto-calculated: Greg={_calc_greg}, Eth={_calc_eth}")
 
     # =========================================
     # VALIDATION
