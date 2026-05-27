@@ -2,6 +2,7 @@ from PIL import Image, ImageDraw, ImageFont
 import cv2
 import os
 import json
+import re
 from rembg import remove, new_session
 from datetime import datetime, timedelta
 from PIL import (
@@ -62,6 +63,7 @@ def calculate_issue_date(date_str):
 
     try:
         if any(c.isalpha() for c in date_str):
+            # Format: YYYY/Mon/DD  (Gregorian with alpha month)
             parts = date_str.split("/")
             if len(parts) != 3:
                 return date_str
@@ -71,6 +73,23 @@ def calculate_issue_date(date_str):
             day = str(int(day) + 2).zfill(2)
 
             return f"{year}/{mon}/{day}"
+
+        elif re.match(r"^\d{2}/\d{2}/\d{4}$", date_str):
+            # Format: DD/MM/YYYY  (Ethiopian calendar)
+            dd, mm, yyyy = date_str.split("/")
+            new_day  = int(dd) + 2
+            new_year = int(yyyy) - 8
+            # Ethiopian months have 30 days (month 13 has 5 or 6)
+            max_day = 5 if int(mm) == 13 else 30
+            if new_day > max_day:
+                new_day -= max_day
+                new_month = int(mm) + 1
+                if new_month > 13:
+                    new_month = 1
+                    new_year += 1
+            else:
+                new_month = int(mm)
+            return f"{new_day:02d}/{new_month:02d}/{new_year}"
 
         else:
             dt = datetime.strptime(date_str, "%Y/%m/%d")
