@@ -83,6 +83,38 @@ def no_access_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+# =========================================================
+# TEMPLATE HELPERS
+# =========================================================
+def get_available_templates() -> list:
+    """Scan assets/templates/ and return list of available template IDs."""
+    templates = []
+    tdir = "assets/templates"
+    if os.path.exists(f"{tdir}/front.tif"):
+        templates.append("a")
+    for letter in "bcdefghijklmnop":
+        if os.path.exists(f"{tdir}/front_{letter}.tif"):
+            templates.append(letter)
+    return templates or ["a"]
+
+
+def template_keyboard() -> InlineKeyboardMarkup:
+    templates = get_available_templates()
+    row, buttons = [], []
+    for tid in templates:
+        row.append(InlineKeyboardButton(
+            f"📄 Template {tid.upper()}",
+            callback_data=f"select_template_{tid}"
+        ))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton("🔄 Reset Session", callback_data="reset")])
+    return InlineKeyboardMarkup(buttons)
+
+
 def request_picker_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
@@ -259,6 +291,53 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================================================
+# BROADCAST COMMAND (admin only)
+# Usage: /broadcast Your message here
+# =========================================================
+async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = update.message.from_user
+    access.register(u.id, u.username)
+
+    if not access.is_admin(u.id, u.username):
+        await update.message.reply_text("❌ Admin only.")
+        return
+
+    msg = " ".join(context.args).strip()
+    if not msg:
+        await update.message.reply_text(
+            "Usage: <code>/broadcast Your message here</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    data = access._load()
+    users = data["users"]
+    sent = failed = 0
+
+    status_msg = await update.message.reply_text(
+        f"📢 Broadcasting to {len(users)} users..."
+    )
+
+    for uid in users:
+        try:
+            await context.bot.send_message(
+                chat_id=int(uid),
+                text=f"📢 <b>Announcement</b>\n\n{msg}",
+                parse_mode="HTML"
+            )
+            sent += 1
+        except Exception:
+            failed += 1
+
+    await status_msg.edit_text(
+        f"📢 <b>Broadcast complete</b>\n\n"
+        f"✅ Delivered: {sent}\n"
+        f"❌ Failed: {failed}",
+        parse_mode="HTML"
+    )
+
+
+# =========================================================
 # STATUS COMMAND (admin only)
 # =========================================================
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -399,6 +478,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
         await _send_access_request(context, u, requested)
+
+    # -------------------------------------------------------
+    # TEMPLATE SELECTION
+    # select_template_{tid}
+    # -------------------------------------------------------
+    elif data.startswith("select_template_"):
+        tid     = data.split("_", 2)[2]
+        session = user_sessions.get(u.id)
+        if not session or session.get("step") != "waiting_template":
+            await query.message.reply_text(
+                "⚠️ No pending session.\n\n"
+                "📸 Send a <b>FRONT</b> ID screenshot to start.",
+                parse_mode="HTML"
+            )
+            return
+        session["template_id"] = tid
+        session["step"]        = "waiting_face"
+        await query.message.reply_text(
+            f"✅ <b>Template {tid.upper()}</b> selected.\n\n"
+            "📸 Now send the <b>face photo</b> of the person.",
+            parse_mode="HTML",
+            reply_markup=reset_keyboard()
+        )
 
     # -------------------------------------------------------
     # BACK TO MENU
@@ -634,28 +736,50 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             processed_files[cache_key] = time.time()
 
+            available_templates = get_available_templates()
+            auto_template = available_templates[0] if len(available_templates) == 1 else None
+
             user_sessions[user_id] = {
-                "step": "waiting_face",
+                "step": "waiting_face" if auto_template else "waiting_template",
                 "front_data": front_data,
                 "job_id": job_id,
                 "last_file_id": telegram_file_id,
                 "created_at": time.time(),
                 "front_processing": False,
-                "back_processing": False
+                "back_processing": False,
+                "template_id": auto_template or "a"
             }
 
-            await update.message.reply_text(
-                "✅ Front data extracted.\n\n"
-                "📸 Now send the <b>face photo</b> of the person.",
-                parse_mode="HTML",
-                reply_markup=reset_keyboard()
-            )
+            if auto_template:
+                await update.message.reply_text(
+                    "✅ Front data extracted.\n\n"
+                    "📸 Now send the <b>face photo</b> of the person.",
+                    parse_mode="HTML",
+                    reply_markup=reset_keyboard()
+                )
+            else:
+                await update.message.reply_text(
+                    "✅ Front data extracted.\n\n"
+                    "📋 Choose a template to use:",
+                    reply_markup=template_keyboard()
+                )
             return
 
         # =====================================================
         # EXISTING SESSION
         # =====================================================
         session = user_sessions[user_id]
+
+        # =====================================================
+        # WAITING FOR TEMPLATE SELECTION
+        # =====================================================
+        if session["step"] == "waiting_template":
+            await safe_reply(
+                update.message.reply_text,
+                "📋 Please choose a template first:",
+                reply_markup=template_keyboard()
+            )
+            return
 
         # =====================================================
         # STEP 2 → FACE
@@ -682,7 +806,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 front_data,
                 file_path,
                 front_output,
-                debug_dir=user_temp
+                debug_dir=user_temp,
+                template_id=session.get("template_id", "a")
             )
 
             if not front_path:
@@ -795,7 +920,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 back_data,
                 qr_crop,
                 back_output,
-                person_name
+                person_name,
+                template_id=session.get("template_id", "a")
             )
 
             session["back_generated"]  = True
@@ -891,8 +1017,9 @@ def main():
     app.add_handler(CommandHandler("mypoints", mypoints_command))
     app.add_handler(CommandHandler("grant",    grant_command))
     app.add_handler(CommandHandler("revoke",   revoke_command))
-    app.add_handler(CommandHandler("users",    users_command))
-    app.add_handler(CommandHandler("status",   status_command))
+    app.add_handler(CommandHandler("users",     users_command))
+    app.add_handler(CommandHandler("status",    status_command))
+    app.add_handler(CommandHandler("broadcast", broadcast_command))
 
     app.add_handler(CallbackQueryHandler(handle_callback))
 

@@ -162,18 +162,17 @@ def generate_card_number():
 # =========================================================
 # GENERATE BACK
 # =========================================================
-def generate_back(data, qr_crop, output_path, name="unknown"):
+def generate_back(data, qr_crop, output_path, name="unknown", template_id="a"):
 
-    template = Image.open(
-        path("assets", "templates", "back.tif")
-    )
+    # Template A → legacy back.tif / back_coords.json
+    # Template B+ → back_b.tif / back_coords_b.json etc.
+    tpl_file    = "back.tif"           if template_id == "a" else f"back_{template_id}.tif"
+    coords_file = "back_coords.json"   if template_id == "a" else f"back_coords_{template_id}.json"
 
-    draw = ImageDraw.Draw(template)
-    
     card_number = generate_card_number()
     # coords
     with open(
-        path("config", "back_coords.json"),
+        path("config", coords_file),
         "r",
         encoding="utf-8"
     ) as f:
@@ -182,12 +181,9 @@ def generate_back(data, qr_crop, output_path, name="unknown"):
 
     font_en = path("assets", "fonts", "english.ttf")
     font_amh = path("assets", "fonts", "amharic.ttf")
-    
-    # =====================================================
-    # LOAD TEMPLATE (NO COLOR CHANGE)
-    # =====================================================
+
     template = Image.open(
-        path("assets", "templates", "back.tif")
+        path("assets", "templates", tpl_file)
     )
 
     draw = ImageDraw.Draw(template)

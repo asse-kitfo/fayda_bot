@@ -596,12 +596,17 @@ def place_photo_copy(template, face, layout):
 # =========================================================
 # MAIN
 # =========================================================
-def generate_id(data, image_path, output_path, debug_dir="temp"):
+def generate_id(data, image_path, output_path, debug_dir="temp", template_id="a"):
 
-    template = Image.open(path("assets", "templates", "front.tif"))
+    # Template A → legacy front.tif / coords.json
+    # Template B+ → front_b.tif / coords_b.json etc.
+    tpl_file    = "front.tif"    if template_id == "a" else f"front_{template_id}.tif"
+    coords_file = "coords.json"  if template_id == "a" else f"coords_{template_id}.json"
+
+    template = Image.open(path("assets", "templates", tpl_file))
     draw = ImageDraw.Draw(template)
 
-    with open(path("config", "coords.json"), "r", encoding="utf-8") as f:
+    with open(path("config", coords_file), "r", encoding="utf-8") as f:
         layout = json.load(f)
 
     ocr = layout["ocr"]
