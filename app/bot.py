@@ -32,6 +32,15 @@ if os.name == "nt":
 load_dotenv()
 user_sessions = {}
 
+ADMIN_USERNAME = next(iter(access.ADMINS), "admin")
+
+WELCOME_TEXT = (
+    "👋 Welcome to the <b>Fayda ID Card Generator Bot!</b>\n\n"
+    "This bot generates high-quality Fayda Digital ID card images from your screenshots.\n\n"
+    "📞 Need help or access?\n"
+    f"Contact the admin: @{ADMIN_USERNAME}"
+)
+
 HELP_TEXT = (
     "📋 <b>How to use this bot:</b>\n\n"
     "<b>Step 1 —</b> Send a screenshot of the <b>FRONT</b> of the Fayda Digital ID card.\n"
@@ -45,8 +54,7 @@ HELP_TEXT = (
     "• Make sure the full ID is visible\n"
     "• Text should be clear and not blurry\n"
     "• No dark overlay or cropping\n"
-    "• Use a well-lit face photo\n\n"
-    "Type /help anytime to see these instructions again."
+    "• Use a well-lit face photo"
 )
 
 # =========================================================
@@ -72,6 +80,21 @@ def no_access_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📨 Request Access", callback_data="request_access")],
         [InlineKeyboardButton("🎯 My Points", callback_data="mypoints")],
+    ])
+
+
+def request_picker_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("5 pts",   callback_data="request_pts_5"),
+            InlineKeyboardButton("10 pts",  callback_data="request_pts_10"),
+            InlineKeyboardButton("20 pts",  callback_data="request_pts_20"),
+        ],
+        [
+            InlineKeyboardButton("50 pts",  callback_data="request_pts_50"),
+            InlineKeyboardButton("100 pts", callback_data="request_pts_100"),
+        ],
+        [InlineKeyboardButton("⬅️ Back",   callback_data="back_to_menu")],
     ])
 
 
@@ -116,7 +139,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     has_acc = access.has_access(u.id)
 
     await update.message.reply_text(
-        "👋 Welcome to the <b>Fayda ID Card Generator Bot!</b>\n\n" + HELP_TEXT,
+        WELCOME_TEXT,
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(has_acc, pts)
     )
@@ -274,7 +297,6 @@ async def _send_points(reply_fn, user_id: int):
 
 
 async def _do_request_access(reply_fn, context, u):
-    uname = u.username or str(u.id)
     pts = access.get_points(u.id)
 
     if pts is None:
@@ -288,11 +310,20 @@ async def _do_request_access(reply_fn, context, u):
         )
         return
 
+    # Show point picker — actual request sent when user picks an amount
     await reply_fn(
-        "📨 Access request sent to the admin.\n"
-        "You will be notified once access is granted."
+        "📨 <b>Request Access</b>\n\n"
+        "How many points are you requesting?\n"
+        "Tap an amount below:",
+        parse_mode="HTML",
+        reply_markup=request_picker_keyboard()
     )
-    print(f"🔔 ACCESS REQUEST from @{uname} (id={u.id})")
+
+
+async def _send_access_request(context, u, requested_pts: int):
+    """Send the actual access request to all admins after user picked an amount."""
+    uname = u.username or str(u.id)
+    print(f"🔔 ACCESS REQUEST from @{uname} (id={u.id}) — {requested_pts} pts")
 
     admin_ids = access.get_admin_ids()
     for admin_id in admin_ids:
@@ -302,7 +333,8 @@ async def _do_request_access(reply_fn, context, u):
                 text=(
                     f"🔔 <b>New access request</b>\n\n"
                     f"User: @{uname}\n"
-                    f"ID: <code>{u.id}</code>"
+                    f"ID: <code>{u.id}</code>\n"
+                    f"Requested: <b>{requested_pts} points</b>"
                 ),
                 parse_mode="HTML",
                 reply_markup=admin_grant_keyboard(u.id, uname)
@@ -339,10 +371,46 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _send_points(query.message.reply_text, u.id)
 
     # -------------------------------------------------------
-    # REQUEST ACCESS
+    # REQUEST ACCESS — show point picker
     # -------------------------------------------------------
     elif data == "request_access":
         await _do_request_access(query.message.reply_text, context, u)
+
+    # -------------------------------------------------------
+    # REQUEST POINTS — user picked an amount
+    # request_pts_{n}
+    # -------------------------------------------------------
+    elif data.startswith("request_pts_"):
+        pts_check = access.get_points(u.id)
+        if pts_check is None:
+            await query.message.reply_text("✅ You already have unlimited access.")
+            return
+        if pts_check > 0:
+            await query.message.reply_text(
+                f"✅ You already have <b>{pts_check}</b> point(s).",
+                parse_mode="HTML"
+            )
+            return
+
+        requested = int(data.split("_")[2])
+        await query.message.reply_text(
+            f"📨 Your request for <b>{requested} points</b> has been sent to the admin.\n"
+            "You will be notified once access is granted.",
+            parse_mode="HTML"
+        )
+        await _send_access_request(context, u, requested)
+
+    # -------------------------------------------------------
+    # BACK TO MENU
+    # -------------------------------------------------------
+    elif data == "back_to_menu":
+        pts = access.get_points(u.id)
+        has_acc = access.has_access(u.id)
+        await query.message.reply_text(
+            WELCOME_TEXT,
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(has_acc, pts)
+        )
 
     # -------------------------------------------------------
     # RESET SESSION
