@@ -70,6 +70,7 @@ def main_menu_keyboard(has_access_flag: bool, pts) -> InlineKeyboardMarkup:
         else:
             points_label = f"🎯 My Points ({pts})"
         buttons.append([InlineKeyboardButton(points_label, callback_data="mypoints")])
+        buttons.append([InlineKeyboardButton("🎨 Choose Template", callback_data="choose_template")])
     else:
         buttons.append([InlineKeyboardButton("📨 Request Access", callback_data="request_access")])
     buttons.append([InlineKeyboardButton("🔄 Reset Session", callback_data="reset")])
@@ -98,14 +99,12 @@ def get_available_templates() -> list:
     return templates or ["a"]
 
 
-def template_keyboard() -> InlineKeyboardMarkup:
+def template_keyboard(current_tid: str = None) -> InlineKeyboardMarkup:
     templates = get_available_templates()
     row, buttons = [], []
     for tid in templates:
-        row.append(InlineKeyboardButton(
-            f"📄 Template {tid.upper()}",
-            callback_data=f"select_template_{tid}"
-        ))
+        label = f"✅ Template {tid.upper()}" if tid == current_tid else f"📄 Template {tid.upper()}"
+        row.append(InlineKeyboardButton(label, callback_data=f"select_template_{tid}"))
         if len(row) == 2:
             buttons.append(row)
             row = []
@@ -480,27 +479,62 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _send_access_request(context, u, requested)
 
     # -------------------------------------------------------
+    # CHOOSE TEMPLATE — show preview + picker
+    # -------------------------------------------------------
+    elif data == "choose_template":
+        if not access.has_access(u.id):
+            await query.message.reply_text("🔒 You need access to choose a template.")
+            return
+        current_tid = access.get_template(u.id)
+        sample_path = "assets/template_sample.jpg"
+        caption = (
+            "🎨 <b>Choose a Template</b>\n\n"
+            f"Your current template: <b>Template {current_tid.upper()}</b>\n\n"
+            "Tap a template below to set it as your default:"
+        )
+        if os.path.exists(sample_path):
+            with open(sample_path, "rb") as f:
+                await query.message.reply_photo(
+                    photo=f,
+                    caption=caption,
+                    parse_mode="HTML",
+                    reply_markup=template_keyboard(current_tid)
+                )
+        else:
+            await query.message.reply_text(
+                caption,
+                parse_mode="HTML",
+                reply_markup=template_keyboard(current_tid)
+            )
+
+    # -------------------------------------------------------
     # TEMPLATE SELECTION
     # select_template_{tid}
     # -------------------------------------------------------
     elif data.startswith("select_template_"):
         tid     = data.split("_", 2)[2]
         session = user_sessions.get(u.id)
-        if not session or session.get("step") != "waiting_template":
+
+        # Save as user's default regardless of session state
+        access.set_template(u.id, tid)
+
+        # If mid-flow waiting for template, continue the flow
+        if session and session.get("step") == "waiting_template":
+            session["template_id"] = tid
+            session["step"]        = "waiting_face"
             await query.message.reply_text(
-                "⚠️ No pending session.\n\n"
-                "📸 Send a <b>FRONT</b> ID screenshot to start.",
+                f"✅ <b>Template {tid.upper()}</b> selected.\n\n"
+                "📸 Now send the <b>face photo</b> of the person.",
+                parse_mode="HTML",
+                reply_markup=reset_keyboard()
+            )
+        else:
+            # Standalone selection from main menu
+            await query.message.reply_text(
+                f"✅ <b>Template {tid.upper()}</b> is now your default template.\n\n"
+                "It will be used automatically for all future generations.",
                 parse_mode="HTML"
             )
-            return
-        session["template_id"] = tid
-        session["step"]        = "waiting_face"
-        await query.message.reply_text(
-            f"✅ <b>Template {tid.upper()}</b> selected.\n\n"
-            "📸 Now send the <b>face photo</b> of the person.",
-            parse_mode="HTML",
-            reply_markup=reset_keyboard()
-        )
 
     # -------------------------------------------------------
     # BACK TO MENU
@@ -736,33 +770,27 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             processed_files[cache_key] = time.time()
 
-            available_templates = get_available_templates()
-            auto_template = available_templates[0] if len(available_templates) == 1 else None
+            # Use user's saved default template (set via Choose Template button)
+            saved_template = access.get_template(user_id)
 
             user_sessions[user_id] = {
-                "step": "waiting_face" if auto_template else "waiting_template",
+                "step": "waiting_face",
                 "front_data": front_data,
                 "job_id": job_id,
                 "last_file_id": telegram_file_id,
                 "created_at": time.time(),
                 "front_processing": False,
                 "back_processing": False,
-                "template_id": auto_template or "a"
+                "template_id": saved_template
             }
 
-            if auto_template:
-                await update.message.reply_text(
-                    "✅ Front data extracted.\n\n"
-                    "📸 Now send the <b>face photo</b> of the person.",
-                    parse_mode="HTML",
-                    reply_markup=reset_keyboard()
-                )
-            else:
-                await update.message.reply_text(
-                    "✅ Front data extracted.\n\n"
-                    "📋 Choose a template to use:",
-                    reply_markup=template_keyboard()
-                )
+            await update.message.reply_text(
+                f"✅ Front data extracted.\n\n"
+                f"📸 Now send the <b>face photo</b> of the person.\n"
+                f"<i>Template {saved_template.upper()} will be used. Change it anytime from the menu.</i>",
+                parse_mode="HTML",
+                reply_markup=reset_keyboard()
+            )
             return
 
         # =====================================================
@@ -771,13 +799,14 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session = user_sessions[user_id]
 
         # =====================================================
-        # WAITING FOR TEMPLATE SELECTION
+        # WAITING FOR TEMPLATE SELECTION (legacy fallback)
         # =====================================================
         if session["step"] == "waiting_template":
+            current_tid = access.get_template(user_id)
             await safe_reply(
                 update.message.reply_text,
                 "📋 Please choose a template first:",
-                reply_markup=template_keyboard()
+                reply_markup=template_keyboard(current_tid)
             )
             return
 

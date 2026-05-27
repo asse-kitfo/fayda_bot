@@ -150,6 +150,25 @@ def revoke(target_username: str) -> str:
 
 
 # =========================================================
+# TEMPLATE PREFERENCE
+# =========================================================
+def get_template(user_id: int) -> str:
+    data = _load()
+    u = data["users"].get(str(user_id))
+    if not u:
+        return "a"
+    return u.get("template", "a")
+
+
+def set_template(user_id: int, template_id: str):
+    data = _load()
+    uid = str(user_id)
+    if uid in data["users"]:
+        data["users"][uid]["template"] = template_id
+        _save(data)
+
+
+# =========================================================
 # ADMIN: GET TELEGRAM USER IDs (for DM notifications)
 # =========================================================
 def get_admin_ids() -> list[int]:
