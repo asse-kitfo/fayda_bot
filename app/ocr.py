@@ -795,21 +795,20 @@ def confirm_dates(data):
         issues.append("DOB Ethiopian is invalid")
 
     # =====================================================
-    # EXP GREG (warning only — garbled month shouldn't block)
+    # EXP (warning only — completely absent = no warning)
     # =====================================================
     exp_greg = data.get("exp_greg", "")
+    exp_eth  = data.get("exp_eth",  "")
     exp_warnings = []
 
-    if suspicious(exp_greg) or not is_date(exp_greg):
-        exp_warnings.append("EXP Gregorian is invalid")
-
-    # =====================================================
-    # EXP ETH (warning only)
-    # =====================================================
-    exp_eth = data.get("exp_eth", "")
-
-    if suspicious(exp_eth) or not is_date(exp_eth):
-        exp_warnings.append("EXP Ethiopian is invalid")
+    if not exp_greg and not exp_eth:
+        # Card has no expiry date field — perfectly valid, skip checks
+        print("ℹ️  No exp date on card — skipping exp validation")
+    else:
+        if exp_greg and (suspicious(exp_greg) or not is_date(exp_greg)):
+            exp_warnings.append("EXP Gregorian is invalid")
+        if exp_eth and (suspicious(exp_eth) or not is_date(exp_eth)):
+            exp_warnings.append("EXP Ethiopian is invalid")
 
     # =====================================================
     # RESULT
