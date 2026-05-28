@@ -1058,8 +1058,16 @@ def fix_amharic_from_english(name_en, name_am):
         # =================================================
         if "fi" in en_word and "ፊ" not in am_word:
             am_word = am_word.replace("ፌ", "ፊ")
+            
+        # =================================================
+        # RULE 5:
+        # if Amharic contains "ል"
+        # and English doesn't contain "l"
+        # =================================================
+        if "ል" in am_word and "l" not in en_word:
 
-        return am_word
+            en_word = en_word.replace("i", "l")
+            
     # =====================================================
     # POSITIONAL ALIGNMENT
     # first ↔ first
