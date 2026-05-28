@@ -1154,6 +1154,41 @@ def process_ocr(image_path, confirm=True, debug_dir="temp"):
     # =========================================
 
     # =========================================
+    # FALLBACK: exp date still empty after all OCR attempts
+    # Use today as the issue date and derive exp from it:
+    #   exp_year  = today.year  + 8
+    #   exp_month = today.month (same)
+    #   exp_day   = today.day   - 2  (wraps to previous month if < 1)
+    # =========================================
+    if not exp_greg:
+        from datetime import date as _date
+        import calendar as _calendar
+
+        _MONTH_ABBREVS = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+        ]
+
+        today     = _date.today()
+        exp_year  = today.year + 8
+        exp_month = today.month
+        exp_day   = today.day - 2
+
+        if exp_day < 1:
+            exp_month -= 1
+            if exp_month < 1:
+                exp_month = 12
+                exp_year  -= 1
+            exp_day = _calendar.monthrange(exp_year, exp_month)[1] + exp_day
+
+        exp_greg = f"{exp_year}/{_MONTH_ABBREVS[exp_month - 1]}/{exp_day:02d}"
+        print(f"📅 exp fallback from today ({today}): {exp_greg!r}")
+
+        exp_eth = greg_to_eth(exp_greg) or ""
+        if exp_eth:
+            print(f"📅 exp_eth fallback: {exp_eth!r}")
+
+    # =========================================
     # FIX AMHARIC OCR USING ENGLISH
     # =========================================
     name_am = fix_amharic_from_english(name_en, name_am)
