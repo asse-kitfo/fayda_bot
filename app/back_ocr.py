@@ -801,6 +801,53 @@ def clean_line(x):
 
     return x
 
+
+# =========================================================
+# WOREDA TABLE + FUZZY MATCHER  (module-level so both
+# parse_back and process_back_ocr can share it)
+# =========================================================
+_WOREDA_TABLE = [
+    # Gurage Zone woredas
+    (["enor"],               "Enor",                         "እኖር"),
+    (["cheha"],              "Cheha",                        "ቸሀ"),
+    (["abeshge"],            "Abeshge",                      "አበሽጌ"),
+    (["gunchere"],           "Gunchere City Administration", "ጉንችሬ ከተማ አስተዳደር"),
+    (["wolkite", "welkite"], "Wolkite City Administration",  "ወልቂጤ ከተማ አስተዳደር"),
+    (["emdibir"],            "Emdibir City Administration",  "እምድብር ከተማ አስተዳደር"),
+    (["arekit"],             "Arekit City Administration",   "አረቅጥ ከተማ አስተዳደር"),
+    (["agena"],              "Agena City Administration",    "አገና ከተማ አስተዳደር"),
+    (["geta"],               "Geta",                         "ጌታ"),
+    (["goro"],               "Goro",                         "ጎሮ"),
+    (["gumer"],              "Gumer",                        "ጉመር"),
+    (["endegagn"],           "Endegagn",                     "እንደጋኝ"),
+    (["ener meger"],         "Ener Meger",                   "ኢነር መገር"),
+    (["mohrna", "mohrena"],  "Mohrna Aklil",                 "ሞህርና አክሊል"),
+    (["ezja"],               "Ezja",                         "ኧዣ"),
+    (["kombolcha"],          "Kombolcha City Administration","ኮምቦልቻ ከተማ አስተዳደር"),
+]
+
+
+def detect_woreda(raw_woreda):
+    """Fuzzy-match a raw OCR woreda string to a canonical (en, amh) pair."""
+    if not raw_woreda:
+        return "", ""
+    low = raw_woreda.lower().strip()
+
+    # Dynamic "Woreda NN" pattern (Addis Ababa numbered woredas)
+    m = re.fullmatch(r"woreda\s+(\d+)", low)
+    if m:
+        num = m.group(1)
+        return f"Woreda {num}", f"ወረዳ {num}"
+
+    for variants, canon_en, canon_amh in _WOREDA_TABLE:
+        for v in variants:
+            if v in low:
+                return canon_en, canon_amh
+
+    # No match — return cleaned raw value, amh stays empty
+    return raw_woreda.strip(), ""
+
+
 # =========================================================
 # PARSE BACK DATA
 # =========================================================
@@ -1023,40 +1070,121 @@ def parse_back(text):
         data["region_amh"] = region_amh
 
     # =====================================================
-    # ZONE + WOREDA EXTRACTION
+    # ZONE DETECTION
+    # Same signal-table approach as detect_region():
+    # scan all lines, Amharic first, fuzzy English fallback.
+    # Covers Gurage Zone and all Addis Ababa subcities.
     # =====================================================
+
+    # (canonical_en, canonical_amh, amh_signals, eng_signals)
+    ZONE_TABLE = [
+        (
+            "Gurage Zone", "ጉራጌ ዞን",
+            # Amharic: "ጉራጌ" is unique. Also catch garbled
+            # versions like "ጉሬዞን" / "ጉሬቴዞንነ" via "ጉ"+"ዞን"
+            ["ጉራጌ"],
+            ["gurage"],
+        ),
+        (
+            "Kolfe Keranio", "ኮልፌ ቀራንዮ",
+            ["ኮልፌ"],
+            ["kolfe"],
+        ),
+        (
+            "Bole", "ቦሌ",
+            ["ቦሌ"],
+            ["bole"],
+        ),
+        (
+            "Yeka", "የካ",
+            ["የካ"],
+            ["yeka"],
+        ),
+        (
+            "Arada", "አራዳ",
+            ["አራዳ"],
+            ["arada"],
+        ),
+        (
+            "Lideta", "ልደታ",
+            ["ልደታ"],
+            ["lideta"],
+        ),
+        (
+            "Kirkos", "ቂርቆስ",
+            ["ቂርቆ"],
+            ["kirkos"],
+        ),
+        (
+            "Akaky Kaliti", "አቃቂ ቃሊቲ",
+            ["አቃቂ"],
+            ["akaki", "akaky"],
+        ),
+        (
+            "Gulele", "ጉለሌ",
+            ["ጉለሌ"],
+            ["gulele"],
+        ),
+        (
+            "Nifas Silk Lafto", "ንፋስ ስልክ ላፍቶ",
+            ["ንፋስ"],
+            ["nifas"],
+        ),
+        (
+            "Addis Ketema", "አዲስ ከተማ",
+            ["አዲስ ከተማ"],
+            ["addis ketema"],
+        ),
+        (
+            "Lemi Kura", "ለሚ ኩራ",
+            ["ለሚ"],
+            ["lemi"],
+        ),
+    ]
+
+    def detect_zone(lines):
+        full_text     = " ".join(lines)
+        full_text_low = full_text.lower()
+
+        for canon_en, canon_amh, amh_sigs, eng_sigs in ZONE_TABLE:
+
+            # Amharic pass
+            for sig in amh_sigs:
+                if sig in full_text:
+                    print(f"✅ ZONE via Amharic '{sig}': {canon_en}")
+                    return canon_en, canon_amh
+
+            # English pass — also catch garbled "gurage zon", "gurage zone", etc.
+            for sig in eng_sigs:
+                if sig in full_text_low:
+                    print(f"✅ ZONE via English '{sig}': {canon_en}")
+                    return canon_en, canon_amh
+
+        # Fallback: pick any line that contains "zone" (raw capture)
+        for line in lines:
+            if "zone" in line.lower():
+                raw = line.strip()
+                print(f"⚠️  ZONE raw fallback: {raw}")
+                return raw, ""
+
+        return "", ""
+
+    zone_en, zone_amh = detect_zone(addr)
+    if zone_en:
+        data["zone"]     = zone_en
+        data["zone_amh"] = zone_amh
+
+    # =====================================================
+    # WOREDA EXTRACTION
+    # detect_woreda() is defined at module level above.
     for line in addr:
 
         low = line.lower().strip()
 
         # =========================================
-        # ZONE
+        # WOREDA (English-only lines)
         # =========================================
-        if "zone" in low:
-
-            data["zone"] = line.strip()
-
-        # Addis Ababa subcities
-        elif low in [
-            "kolfe keranio",
-            "bole",
-            "yeka",
-            "arada",
-            "lideta",
-            "kirkos",
-            "akaky kaliti",
-            "gulele",
-            "nifas silk lafto",
-            "addis ketema",
-            "lemi kura"
-        ]:
-
-            data["zone"] = line.strip()
-
-        # =========================================
-        # WOREDA
-        # =========================================
-        elif re.fullmatch(r"[A-Za-z0-9 ]+", line):
+        if re.fullmatch(r"[A-Za-z0-9 ]+", line):
 
             if (
                 "ethiopian" not in low
@@ -1069,7 +1197,7 @@ def parse_back(text):
                 ]
             ):
 
-                # prioritize actual woreda lines
+                # prioritize explicit "woreda" keyword
                 if "woreda" in low:
                     data["woreda"] = line.strip()
 
@@ -1077,221 +1205,13 @@ def parse_back(text):
                 elif not data["woreda"]:
                     data["woreda"] = line.strip()
                     
-   # =====================================================
-    # FIX KNOWN VALUES
-    # =====================================================
-    zone_map = {
-        "gurage zone": 
-            "Gurage Zone",
-        "bole": 
-            "ቦሌ",
-        "yeka": 
-            "የካ",
-        "arada": 
-            "አራዳ",
-        "lideta": 
-            "ልደታ",
-        "kirkos": 
-            "ቂርቆስ",
-        "akaki kaliti": 
-            "አቃቂ ቃሊቲ",
-        "gulele": "ጉለሌ",
-        "nifas silk lafto": 
-            "ንፋስ ስልክ ላፍቶ",
-        "addis ketema": 
-            "አዲስ ከተማ",
-        "lemi kura": 
-            "ለሚ ኩራ",
-        "nifas silk lafto": 
-            "ንፋስ ስልክ ላፍቶ",
-        
-    }
-
-    woreda_map = {
-        "enor": "Enor"
-    }
-
-    woreda_amh_map = {
-        "enor":
-            "እኖር",
-        "እኖር":
-            "enor",
-
-        "gunchere city administration":
-            "ጉንችሬ ከተማ አስተዳደር",
-        "ጉንችሬ ከተማ አስተዳደር":
-            "gunchere city administration",
-
-        "wolkite town administration":
-            "ወልቂጤ ከተማ አስተዳደር",
-        "ወልቂጤ ከተማ አስተዳደር":
-            "wolkite town administration",
-
-        "welkite city administration":
-            "ወልቂጤ ከተማ አስተዳደር",
-
-        "abeshge":
-            "አበሽጌ",
-        "አበሽጌ":
-            "abeshge",
-
-        "kombolcha city administration":
-            "ኮምቦልቻ ከተማ አስተዳደር",
-        "ኮምቦልቻ ከተማ አስተዳደር":
-            "kombolcha city administration",
-        
-        "geta": "ጌታ",
-        "goro": "ጎሮ",
-        "ጎሮ": "goro",
-        
-        "emdibir city administration": 
-            "እምድብር ከተማ አስተዳደር",
-            
-        "እምድብር ከተማ አስተዳደር":
-            "emdibir city administration", 
-            
-        "arekit city administration": 
-            "አረቅጥ ከተማ አስተዳደር",
-        
-        "አረቅጥ ከተማ አስተዳደር": 
-            "arekit city administration",
-        
-        "agena city administration": 
-            "አገና ከተማ አስተዳደር",
-        "አገና ከተማ አስተዳደር": 
-            "agena city administration",
-            
-        "cheha": "ቸሀ",
-        "ቸሀ": "cheha",
-        
-        "mohrna aklil": "ሞህርና አክሊል",
-        "ሞህርና አክሊል": "mohrna aklil",
-       
-        "ezja": "ኧዣ",
-        "ኧዣ": "ezja",
-        
-        "geta": "ጌታ",
-        "ጌታ": "geta",
-        
-        "gumer": "ጉመር",
-        "ጉመር": "gumer",
-        
-        "endegagn": "እንደጋኝ",
-        "እንደጋኝ": "endegagn",
-        
-        "ener meger": "ኢነር መገር",
-        "ኢነር መገር": "ener meger"
-        
-        
-        
-        
-    }
-
-    z = data["zone"].lower()
-    w = data["woreda"].lower()
-
-    if z in zone_map:
-        data["zone"] = zone_map[z]
-
-    if w in woreda_map:
-        data["woreda"] = woreda_map[w]
-            
-    # =====================================================
-    # DYNAMIC WOREDA NUMBER
-    # example:
-    # "Woreda 05" -> "ወረዳ 05"
-    # =====================================================
-    match = re.fullmatch(
-        r"woreda\s+(\d+)",
-        w,
-        re.IGNORECASE
-    )
-
-    if match:
-        number = match.group(1)
-        data["woreda_amh"] = f"ወረዳ {number}"
-        
-    # region_amh is now set directly by detect_region() above.
-    # No secondary lookup needed.
-
-    zone_amh_map = {
-        "gurage zone":
-            "ጉራጌ ዞን",
-
-        "south wollo zone":
-            "ደቡብ ወሎ ዞን",
-
-        "kolfe keranio":
-            "ኮልፌ ቀራንዮ",
-            
-        "south west shawa":
-            "ደቡብ ምዕራብ ሸዋ",
-            
-        "bole":
-            "ቦሌ",
-
-        "yeka":
-            "የካ",
-
-        "arada":
-            "አራዳ",
-
-        "lideta":
-            "ልደታ",
-
-        "kirkos":
-            "ቂርቆስ",
-
-        "akaki kaliti":
-            "አቃቂ ቃሊቲ",
-
-        "gulele":
-            "ጉለሌ",
-
-        "nifas silk lafto":
-            "ንፋስ ስልክ ላፍቶ",
-
-        "addis ketema":
-            "አዲስ ከተማ",
-
-        "lemi kura":
-            "ለሚ ኩራ",
-                "bole": 
-            "ቦሌ",
-        "yeka": 
-            "የካ",
-        "arada": 
-            "አራዳ",
-        "lideta": 
-            "ልደታ",
-        "kirkos": 
-            "ቂርቆስ",
-        "akaki kaliti": 
-            "አቃቂ ቃሊቲ",
-        "gulele": "ጉለሌ",
-        "nifas silk lafto": 
-            "ንፋስ ስልክ ላፍቶ",
-        "addis ketema": 
-            "አዲስ ከተማ",
-        "lemi kura": 
-            "ለሚ ኩራ",
-        "nifas silk lafto": 
-            "ንፋስ ስልክ ላፍቶ",
-        
-        }
-
-
-    # zone
-    z = data["zone"].lower()
-
-    if z in zone_amh_map:
-        data["zone_amh"] = zone_amh_map[z]
-
-    # woreda
-    w = data["woreda"].lower()
-
-    if w in woreda_amh_map:
-        data["woreda_amh"] = woreda_amh_map[w]
+    # zone + zone_amh already set by detect_zone() above.
+    # Woreda: run detect_woreda() on whatever the address loop captured.
+    canon_w, canon_w_amh = detect_woreda(data["woreda"])
+    if canon_w:
+        data["woreda"] = canon_w
+    if canon_w_amh:
+        data["woreda_amh"] = canon_w_amh
 
     # =====================================================
     # DEBUG
@@ -1409,48 +1329,12 @@ def process_back_ocr(image_path, confirm=True):
     if woreda:
         data["woreda"] = woreda
         
-    # update amh woreda after dedicated OCR overwrite
-    w = data["woreda"].lower()
-
-    woreda_amh_map = {
-        "enor": "እኖር",
-        "gunchere city administration": "ጉንችሬ ከተማ አስተዳደር",
-        "wolkite town administration": "ወልቂጤ ከተማ አስተዳደር",
-        "abeshge": "አበሽጌ",
-        "welkite city administration": "ወልቂጤ ከተማ አስተዳደር",
-        "kombolcha city administration":
-        "ኮምቦልቻ ከተማ አስተዳደር",
-        "geta": "ጌታ",
-        "goro": "ጎሮ",
-        "emdibir city administration": "እምድብር ከተማ አስተዳደር",
-        "arekit city administration": "አረቅጥ ከተማ አስተዳደር",
-        "agena city administration": "አገና ከተማ አስተዳደር",
-        "cheha": "ቸሀ",
-        "mohrna aklil": "ሞህርና አክሊል",
-        "ezja": "ኧዣ",
-        "geta": "ጌታ",
-        "gumer": "ጉመር",
-        "endegagn": "እንደጋኝ",
-        "ener meger": "ኢነር መገር"
-    }
-
-    if w in woreda_amh_map:
-        data["woreda_amh"] = woreda_amh_map[w]
-            
-    # =====================================================
-    # DYNAMIC WOREDA NUMBER
-    # example:
-    # "Woreda 05" -> "ወረዳ 05"
-    # =====================================================
-    match = re.fullmatch(
-        r"woreda\s+(\d+)",
-        w,
-        re.IGNORECASE
-    )
-
-    if match:
-        number = match.group(1)
-        data["woreda_amh"] = f"ወረዳ {number}"
+    # Re-run detect_woreda() after dedicated extractor overwrites data["woreda"]
+    canon_w, canon_w_amh = detect_woreda(data["woreda"])
+    if canon_w:
+        data["woreda"] = canon_w
+    if canon_w_amh:
+        data["woreda_amh"] = canon_w_amh
 
     data["phone"] = phone
 
