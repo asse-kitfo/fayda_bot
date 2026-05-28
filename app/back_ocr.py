@@ -12,16 +12,7 @@ os.environ["TESSDATA_PREFIX"] = _TESSDATA
 # DEBUG SAVE
 # =========================================================
 def save_debug(debug_dir, filename, image):
-
-    if not debug_dir:
-        return
-
-    os.makedirs(debug_dir, exist_ok=True)
-
-    cv2.imwrite(
-        os.path.join(debug_dir, filename),
-        image
-    )
+    return
 
 
 # =========================================================

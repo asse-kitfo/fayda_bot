@@ -205,6 +205,248 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================================================
+# RETRY COMMAND — re-run last failed step without re-uploading
+# =========================================================
+async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.message.from_user.id
+    access.register(user_id, update.message.from_user.username)
+
+    session = user_sessions.get(user_id)
+
+    if not session or not session.get("last_tg_dl_file_id"):
+        await update.message.reply_text(
+            "⚠️ Nothing to retry.\n\n"
+            "📸 Please send a <b>FRONT</b> ID screenshot to start.",
+            parse_mode="HTML"
+        )
+        return
+
+    if session.get("front_processing") or session.get("back_processing"):
+        await update.message.reply_text("⏳ Processing is already in progress...")
+        return
+
+    if user_id in processing_users:
+        await update.message.reply_text("⏳ Processing is already in progress...")
+        return
+
+    last_attempted = session.get("last_attempted")
+    dl_file_id     = session.get("last_tg_dl_file_id")
+
+    if last_attempted == "front":
+        await update.message.reply_text(
+            "✅ Front data was already extracted.\n\n"
+            "📸 Please send the <b>face photo</b> to continue.",
+            parse_mode="HTML",
+            reply_markup=reset_keyboard()
+        )
+        return
+
+    if last_attempted not in ("face", "back"):
+        await update.message.reply_text(
+            "⚠️ Nothing to retry. Please continue with the next step.",
+            reply_markup=reset_keyboard()
+        )
+        return
+
+    os.makedirs("temp", exist_ok=True)
+    user_temp = f"temp/{user_id}"
+    os.makedirs(user_temp, exist_ok=True)
+
+    retry_file_path = None
+
+    try:
+        tg_file = await context.bot.get_file(dl_file_id)
+        retry_job_id    = str(uuid.uuid4())
+        retry_file_path = f"{user_temp}/{retry_job_id}.jpg"
+        await tg_file.download_to_drive(retry_file_path)
+    except Exception as e:
+        print("❌ Retry download failed:", e)
+        await update.message.reply_text(
+            "❌ Could not re-download the image from Telegram.\n\n"
+            "Please upload the image again."
+        )
+        return
+
+    processing_users.add(user_id)
+
+    try:
+
+        if last_attempted == "face":
+
+            session["front_processing"] = True
+            session["step"]             = "generating_front"
+
+            await update.message.reply_text("🧑 Retrying face processing...")
+
+            front_data   = session["front_data"]
+            front_output = f"temp/{user_id}/front_{session['job_id']}.tif"
+
+            front_path = await asyncio.to_thread(
+                generate_id,
+                front_data,
+                retry_file_path,
+                front_output,
+                user_temp,
+                session.get("template_id", "a")
+            )
+
+            try:
+                os.remove(retry_file_path)
+                retry_file_path = None
+            except OSError:
+                pass
+
+            if not front_path:
+                session["front_processing"] = False
+                session["step"]             = "waiting_face"
+                await safe_reply(
+                    update.message.reply_text,
+                    "❌ No human face detected.\n\n"
+                    "📸 Please upload a clear face photo.",
+                    reply_markup=reset_keyboard()
+                )
+                return
+
+            session["front_generated"]  = True
+            session["front_processing"] = False
+
+            try:
+                with open(front_path, "rb") as f:
+                    await update.message.reply_document(document=f)
+            except Exception as e:
+                print("⚠️ Failed sending front:", e)
+            finally:
+                try:
+                    os.remove(front_path)
+                except OSError:
+                    pass
+
+            session["step"] = "waiting_back"
+            await safe_reply(
+                update.message.reply_text,
+                "✅ Front ID generated.\n\n"
+                "📸 Now send the <b>BACK</b> screenshot of the ID card.",
+                parse_mode="HTML",
+                reply_markup=reset_keyboard()
+            )
+
+        elif last_attempted == "back":
+
+            session["back_processing"] = True
+            session["step"]            = "generating_back"
+
+            await update.message.reply_text("🔍 Retrying back side processing...")
+
+            back_data, qr_crop = await asyncio.to_thread(
+                process_back_ocr,
+                retry_file_path,
+                True,
+                user_temp
+            )
+
+            try:
+                os.remove(retry_file_path)
+                retry_file_path = None
+            except OSError:
+                pass
+
+            if not back_data or qr_crop is None or back_data.get("problems"):
+                session["back_processing"] = False
+                session["step"]            = "waiting_back"
+
+                msg = "❌ BACK validation failed.\n\n"
+                problems = back_data.get("problems", []) if back_data else []
+                for p in problems:
+                    msg += f"• {p}\n"
+                msg += (
+                    "\n📸 Please upload a valid BACK screenshot.\n"
+                    "Make sure:\n"
+                    "• QR code is visible\n"
+                    "• Screenshot is not cropped\n"
+                    "• Text is readable\n"
+                    "• No dark overlay exists"
+                )
+                await safe_reply(
+                    update.message.reply_text,
+                    msg,
+                    reply_markup=reset_keyboard()
+                )
+                return
+
+            front_data  = session["front_data"]
+            person_name = front_data.get("name_en", "unknown")
+            back_output = f"temp/{user_id}/back_{session['job_id']}.tif"
+
+            back_path = await asyncio.to_thread(
+                generate_back,
+                back_data,
+                qr_crop,
+                back_output,
+                person_name,
+                session.get("template_id", "a")
+            )
+
+            session["back_generated"]  = True
+            session["back_processing"] = False
+            access.deduct_point(user_id)
+
+            try:
+                with open(back_path, "rb") as f:
+                    await update.message.reply_document(document=f)
+            except Exception as e:
+                print("⚠️ Failed sending back:", e)
+            finally:
+                try:
+                    os.remove(back_path)
+                except OSError:
+                    pass
+
+            user_sessions.pop(user_id, None)
+
+            pts = access.get_points(user_id)
+            if pts is None:
+                pts_line = "♾ Unlimited access remaining."
+            elif pts == 0:
+                pts_line = "⚠️ You have <b>0 points</b> left. Use the button below to request more."
+            else:
+                pts_line = f"🎯 You have <b>{pts}</b> point(s) remaining."
+
+            await safe_reply(
+                update.message.reply_text,
+                f"✅ Back ID generated. All done!\n\n{pts_line}",
+                parse_mode="HTML",
+                reply_markup=done_keyboard()
+            )
+
+    except TimedOut:
+        await safe_reply(update.message.reply_text, "⚠️ Network timeout. Use /retry to try again.")
+
+    except NetworkError:
+        await safe_reply(update.message.reply_text, "⚠️ Network error. Use /retry to try again.")
+
+    except Exception as e:
+        print("❌ Retry error:", e)
+        await safe_reply(
+            update.message.reply_text,
+            "⚠️ Retry failed. Please upload the image again.",
+            reply_markup=reset_keyboard()
+        )
+
+    finally:
+        s = user_sessions.get(user_id)
+        if s:
+            s["front_processing"] = False
+            s["back_processing"]  = False
+        processing_users.discard(user_id)
+        if retry_file_path:
+            try:
+                os.remove(retry_file_path)
+            except OSError:
+                pass
+
+
+# =========================================================
 # REQUEST COMMAND — user asks for access
 # =========================================================
 async def request_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -922,7 +1164,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_temp = f"temp/{user_id}"
         os.makedirs(user_temp, exist_ok=True)
 
-        telegram_file_id = photo.file_unique_id
+        telegram_file_id    = photo.file_unique_id
+        telegram_dl_file_id = photo.file_id
         cache_key = f"{user_id}_{telegram_file_id}"
 
         if cache_key in processed_files:
@@ -995,6 +1238,11 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+
             processed_files[cache_key] = time.time()
 
             # Use user's saved default template (set via Choose Template button)
@@ -1005,6 +1253,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "front_data": front_data,
                 "job_id": job_id,
                 "last_file_id": telegram_file_id,
+                "last_tg_dl_file_id": telegram_dl_file_id,
+                "last_attempted": "front",
                 "created_at": time.time(),
                 "front_processing": False,
                 "back_processing": False,
@@ -1052,6 +1302,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             session["front_processing"] = True
             session["step"] = "generating_front"
             session["last_file_id"] = telegram_file_id
+            session["last_tg_dl_file_id"] = telegram_dl_file_id
+            session["last_attempted"] = "face"
 
             await safe_reply(update.message.reply_text, "🧑 Processing face...")
 
@@ -1066,6 +1318,11 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_temp,
                 session.get("template_id", "a")
             )
+
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
 
             if not front_path:
                 session["front_processing"] = False
@@ -1087,6 +1344,11 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_document(document=f)
             except Exception as e:
                 print("⚠️ Failed sending front:", e)
+            finally:
+                try:
+                    os.remove(front_path)
+                except OSError:
+                    pass
 
             session["step"] = "waiting_back"
 
@@ -1133,6 +1395,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             session["back_processing"] = True
             session["step"] = "generating_back"
             session["last_file_id"] = telegram_file_id
+            session["last_tg_dl_file_id"] = telegram_dl_file_id
+            session["last_attempted"] = "back"
 
             await safe_reply(update.message.reply_text, "🔍 Processing back side...")
 
@@ -1172,6 +1436,11 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+
             front_data  = session["front_data"]
             processed_files[cache_key] = time.time()
 
@@ -1196,6 +1465,11 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_document(document=f)
             except Exception as e:
                 print("⚠️ Failed sending back:", e)
+            finally:
+                try:
+                    os.remove(back_path)
+                except OSError:
+                    pass
 
             user_sessions.pop(user_id, None)
 
@@ -1280,6 +1554,7 @@ def main():
     app.add_handler(CommandHandler("start",    start))
     app.add_handler(CommandHandler("help",     help_command))
     app.add_handler(CommandHandler("reset",    reset_command))
+    app.add_handler(CommandHandler("retry",    retry_command))
     app.add_handler(CommandHandler("request",  request_command))
     app.add_handler(CommandHandler("mypoints", mypoints_command))
     app.add_handler(CommandHandler("grant",    grant_command))
