@@ -896,49 +896,143 @@ def parse_back(text):
 
     addr = cleaned
 
+    # =====================================================
+    # REGION DETECTION
+    # Scans all address lines at once.
+    # Amharic keywords checked FIRST — they survive OCR
+    # garbling better than English words do.
+    # Each region has unique Amharic + fuzzy English signals.
+    # =====================================================
+
+    # (canonical_en, canonical_amh, amh_signals, eng_signals, eng_excludes)
+    # eng_signals  : any substring that must appear in a lowercased line
+    # eng_excludes : words that must NOT appear (to separate similar names)
+    REGION_TABLE = [
+        (
+            "Addis Ababa", "አዲስ አበባ",
+            ["አዲስ አበባ"],
+            ["addis ababa"],
+            []
+        ),
+        (
+            "Southwest Ethiopia Peoples Region",
+            "ደቡብ ምዕራብ ኢትዮጵያ ህዝቦች ክልላዊ መንግስት",
+            ["ደቡብ ምዕራብ"],
+            ["southwest ethiopia", "south west ethiopia"],
+            []
+        ),
+        (
+            "South Ethiopia Region", "ደቡብ ኢትዮጵያ ክልል",
+            ["ደቡብ ኢትዮጵያ"],
+            ["south ethiopia"],
+            ["west", "southwest", "peoples"]   # exclude Southwest
+        ),
+        (
+            "Central Ethiopia Region", "ማዕከላዊ ኢትዮጵያ ክልል",
+            ["ማዕከላዊ"],
+            ["central ethiopia", "centr"],
+            []
+        ),
+        (
+            "Amhara", "አማራ",
+            ["አማራ"],
+            ["amhara"],
+            []
+        ),
+        (
+            "Oromia", "ኦሮሚያ",
+            ["ኦሮሚያ"],
+            ["oromia"],
+            []
+        ),
+        (
+            "Tigray", "ትግራይ",
+            ["ትግራይ"],
+            ["tigray", "tigrai"],
+            []
+        ),
+        (
+            "Afar", "አፋር",
+            ["አፋር"],
+            ["afar"],
+            []
+        ),
+        (
+            "Somali", "ሶማሌ",
+            ["ሶማሌ"],
+            ["somali"],
+            []
+        ),
+        (
+            "Sidama", "ሲዳማ",
+            ["ሲዳማ"],
+            ["sidama"],
+            []
+        ),
+        (
+            "Gambella", "ጋምቤላ",
+            ["ጋምቤላ"],
+            ["gambella"],
+            []
+        ),
+        (
+            "Benishangul-Gumuz", "ቤኒሻንጉል ጉሙዝ",
+            ["ቤኒሻንጉል"],
+            ["benishangul"],
+            []
+        ),
+        (
+            "Harari", "ሀረሪ",
+            ["ሀረሪ", "ሐረሪ"],
+            ["harari"],
+            []
+        ),
+        (
+            "Dire Dawa", "ድሬ ዳዋ",
+            ["ድሬ ዳዋ", "ድሬዳዋ"],
+            ["dire dawa"],
+            []
+        ),
+    ]
+
+    def detect_region(lines):
+        full_text     = " ".join(lines)
+        full_text_low = full_text.lower()
+
+        for canon_en, canon_amh, amh_sigs, eng_sigs, eng_excl in REGION_TABLE:
+
+            # --- Amharic pass (highest priority) ---
+            for sig in amh_sigs:
+                if sig in full_text:
+                    print(f"✅ REGION via Amharic '{sig}': {canon_en}")
+                    return canon_en, canon_amh
+
+            # --- English pass ---
+            for sig in eng_sigs:
+                if sig in full_text_low:
+                    excluded = any(ex in full_text_low for ex in eng_excl)
+                    if not excluded:
+                        print(f"✅ REGION via English '{sig}': {canon_en}")
+                        return canon_en, canon_amh
+
+        return "", ""
+
+    region_en, region_amh = detect_region(addr)
+    if region_en:
+        data["region"]     = region_en
+        data["region_amh"] = region_amh
 
     # =====================================================
-    # ENGLISH EXTRACTION
+    # ZONE + WOREDA EXTRACTION
     # =====================================================
     for line in addr:
 
         low = line.lower().strip()
 
         # =========================================
-        # REGION
-        # =========================================
-        if low == "amhara":
-
-            data["region"] = "Amhara"
-
-        elif low == "oromia":
-
-            data["region"] = "Oromia"
-
-        elif low == "addis ababa":
-
-            data["region"] = "Addis Ababa"
-
-        elif (
-            "central ethiopia" in low
-            or ("centr" in low and "ethiopia" in low)
-            or ("centrat" in low and "ethiopia" in low)
-            # OCR garbles "Central" into noise but keeps "Ethiopia Region"
-            or (
-                "ethiopia region" in low
-                and "addis" not in low
-                and "ethiopian" not in low
-            )
-            # Amharic "ማዕከላዊ" = Central — reliable even when English is garbled
-            or "ማዕከላዊ" in line
-        ):
-
-            data["region"] = "Central Ethiopia Region"
-
-        # =========================================
         # ZONE
         # =========================================
-        elif "zone" in low:
+        if "zone" in low:
 
             data["zone"] = line.strip()
 
@@ -1117,29 +1211,9 @@ def parse_back(text):
         number = match.group(1)
         data["woreda_amh"] = f"ወረዳ {number}"
         
-    # =====================================================
-    # ENGLISH -> AMHARIC MAPPING
-    # =====================================================
-    region_amh_map = {
-        "central ethiopia region":
-            "ማዕከላዊ ኢትዮጵያ ክልል",
+    # region_amh is now set directly by detect_region() above.
+    # No secondary lookup needed.
 
-        "amhara":
-            "አማራ",
-
-        "addis ababa":
-            "አዲስ አበባ",
-            
-        "ማዕከላዊ ኢትዮጵያ ክልል":
-            "central ethiopia region",
-
-        "አማራ":
-            "amhara",
-
-        "አዲስ አበባ":
-            "addis ababa",
-    }
-   
     zone_amh_map = {
         "gurage zone":
             "ጉራጌ ዞን",
@@ -1206,12 +1280,6 @@ def parse_back(text):
         
         }
 
-
-    # region
-    r = data["region"].lower()
-
-    if r in region_amh_map:
-        data["region_amh"] = region_amh_map[r]
 
     # zone
     z = data["zone"].lower()
