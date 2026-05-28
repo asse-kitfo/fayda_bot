@@ -320,8 +320,6 @@ def extract_face(image_path):
 # =========================================================
 def remove_background(image):
 
-    import numpy as np
-
     # =====================================================
     # REMOVE BG USING GPU SESSION
     # =====================================================
@@ -334,78 +332,27 @@ def remove_background(image):
 
     r_ch, g_ch, b_ch, a_ch = output.split()
 
-    r_arr = np.array(r_ch, dtype=np.float32)
-    g_arr = np.array(g_ch, dtype=np.float32)
-    b_arr = np.array(b_ch, dtype=np.float32)
-    a_arr = np.array(a_ch, dtype=np.uint8)
-
     # =====================================================
-    # SAFE FOREGROUND MASK — only pixels u2net is
-    # confident about (threshold 170).  These have clean
-    # person colours with no background contamination.
-    # =====================================================
-    safe_mask = (a_arr > 170).astype(np.float32)   # 1.0 = safe
-
-    # =====================================================
-    # DOWNWARD DILATION — recover shoulder bottom.
-    # We work on the safe mask, not the blurred alpha.
-    # =====================================================
-    down_kernel = np.zeros((9, 5), dtype=np.uint8)
-    down_kernel[4:, :] = 1
-
-    safe_bin = (safe_mask * 255).astype(np.uint8)
-    dilated  = cv2.dilate(safe_bin, down_kernel, iterations=3)
-
-    # Fringe: pixels added by dilation that weren't safe
-    fringe_mask = (dilated == 255) & (safe_bin == 0)
-
-    # =====================================================
-    # COLOUR DECONTAMINATION — spread safe foreground
-    # colours into the fringe so those pixels carry the
-    # person's own colour instead of dark background.
+    # SOFT ALPHA — keep u2net's original partial values
+    # instead of binarizing.  This means shoulder/edge
+    # pixels (alpha 30-220) stay semi-transparent and
+    # blend naturally with the white ID background.
+    # No dilation → no fringe pixels → no border at all.
     #
-    # Method: Gaussian-blur both the masked colour and
-    # the mask itself, then normalise (pull-colour).
-    # Blur radius 25 px reaches well into the fringe.
+    # Mapping:
+    #   0–30   → 0    (noise / confident background)
+    #   31–220 → original value  (soft natural edge)
+    #   221+   → 255  (confident foreground)
     # =====================================================
-    blur_r = 25
+    alpha = a_ch.point(
+        lambda p: 0 if p <= 30 else (255 if p >= 221 else p)
+    )
 
-    for arr in [r_arr, g_arr, b_arr]:
-        # Zero out background so it doesn't bleed in
-        masked = (arr * safe_mask).astype(np.float32)
+    # Light median to remove salt-and-pepper noise without
+    # destroying the soft shoulder transition.
+    alpha = alpha.filter(ImageFilter.MedianFilter(size=3))
 
-        ch_img    = Image.fromarray(np.clip(masked, 0, 255).astype(np.uint8))
-        mask_img  = Image.fromarray((safe_mask * 255).astype(np.uint8))
-
-        ch_blur   = np.array(
-            ch_img.filter(ImageFilter.GaussianBlur(blur_r)),
-            dtype=np.float32
-        )
-        mask_blur = np.array(
-            mask_img.filter(ImageFilter.GaussianBlur(blur_r)),
-            dtype=np.float32
-        ) / 255.0
-
-        # Avoid div-by-zero far from the person
-        mask_blur = np.clip(mask_blur, 1e-3, 1.0)
-        spread    = np.clip(ch_blur / mask_blur, 0, 255)
-
-        # Replace fringe pixels with spread colour
-        arr[fringe_mask] = spread[fringe_mask]
-
-    # =====================================================
-    # FINAL ALPHA — dilated mask with soft edge fade
-    # =====================================================
-    alpha_final = Image.fromarray(dilated)
-    alpha_final = alpha_final.filter(ImageFilter.GaussianBlur(radius=1))
-
-    # Rebuild RGBA with decontaminated colours
-    output = Image.merge("RGBA", (
-        Image.fromarray(np.clip(r_arr, 0, 255).astype(np.uint8)),
-        Image.fromarray(np.clip(g_arr, 0, 255).astype(np.uint8)),
-        Image.fromarray(np.clip(b_arr, 0, 255).astype(np.uint8)),
-        alpha_final
-    ))
+    output.putalpha(alpha)
 
     return output
 
