@@ -1161,20 +1161,35 @@ def process_ocr(image_path, confirm=True, debug_dir="temp"):
 
     # =========================================
     # CROSS-VALIDATE exp_eth ↔ exp_greg
-    # Same approach: if exp_eth converts to a different year/month
-    # than exp_greg, trust exp_eth (it's always numeric and clean)
-    # and leave exp_greg as already repaired above.
-    # (No reverse repair needed for exp since exp_eth is reliable.)
+    # If both are present but disagree, trust exp_greg and re-derive eth.
     # =========================================
+    if exp_greg and not _needs_month_repair(exp_greg) and exp_eth:
+        computed_greg = eth_to_gregorian(exp_eth)
+        if computed_greg and not _greg_dates_match(computed_greg, exp_greg):
+            repaired_eth = greg_to_eth(exp_greg)
+            if repaired_eth:
+                print(f"🔧 Cross-fixed exp_eth: {exp_eth!r} → {repaired_eth!r}")
+                exp_eth = repaired_eth
+
+    # If exp_greg valid but exp_eth missing or garbled, derive it
+    if exp_greg and not _needs_month_repair(exp_greg) and not is_date(exp_eth):
+        derived = greg_to_eth(exp_greg)
+        if derived:
+            print(f"🔧 Derived exp_eth from exp_greg: {derived!r}")
+            exp_eth = derived
+
+    # If exp_eth valid but exp_greg still missing or garbled, derive it
+    if is_date(exp_eth) and _needs_month_repair(exp_greg):
+        recovered = eth_to_gregorian(exp_eth)
+        if recovered:
+            print(f"🔧 Derived exp_greg from exp_eth: {recovered!r}")
+            exp_greg = recovered
 
     # =========================================
-    # FALLBACK: exp date still empty after all OCR attempts
-    # Use today as the issue date and derive exp from it:
-    #   exp_year  = today.year  + 8
-    #   exp_month = today.month (same)
-    #   exp_day   = today.day   - 2  (wraps to previous month if < 1)
+    # FALLBACK: both exp dates still missing/invalid after all repair
+    # Use today as the issue date → exp = today + 8 years − 2 days
     # =========================================
-    if not exp_greg:
+    if not is_date(exp_greg):
         from datetime import date as _date
         import calendar as _calendar
 
