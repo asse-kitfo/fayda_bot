@@ -919,7 +919,11 @@ def parse_back(text):
 
             data["region"] = "Addis Ababa"
 
-        elif "central ethiopia" in low:
+        elif (
+            "central ethiopia" in low
+            or ("centr" in low and "ethiopia" in low)
+            or ("centrat" in low and "ethiopia" in low)
+        ):
 
             data["region"] = "Central Ethiopia Region"
 

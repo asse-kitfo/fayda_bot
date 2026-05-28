@@ -335,42 +335,46 @@ def remove_background(image):
     r, g, b, a = output.split()
 
     # =====================================================
-    # CLEAN TRANSPARENCY
-    # Lower threshold (128 vs old 170) so semi-transparent
-    # shoulder/edge pixels are kept rather than erased.
+    # CLEAN TRANSPARENCY — keep only confident pixels
+    # (threshold 170) so no background-colored pixels
+    # enter the mask at this stage.
     # =====================================================
     alpha = a.point(
-        lambda p: 255 if p > 128 else 0
+        lambda p: 255 if p > 170 else 0
     )
+
+    alpha_np = np.array(alpha, dtype=np.uint8)
 
     # =====================================================
     # DOWNWARD DILATION — recover shoulder pixels that
     # u2net marks near-transparent at the bottom edge.
-    # Uses an asymmetric kernel: taller below than above.
+    # Asymmetric kernel: expands only downward.
     # =====================================================
-    alpha_np = np.array(alpha, dtype=np.uint8)
+    down_kernel = np.zeros((9, 5), dtype=np.uint8)
+    down_kernel[4:, :] = 1
 
-    kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE, (5, 5)
+    alpha_np = cv2.dilate(alpha_np, down_kernel, iterations=3)
+
+    # =====================================================
+    # EROSION — strip the single outer ring of dark
+    # background-colored fringe pixels introduced by the
+    # dilation, eliminating the black border artefact.
+    # Net result: shoulder recovered, dark border removed.
+    # =====================================================
+    sym_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (3, 3)
     )
 
-    # Shift mask down by 4 px so shoulder base is filled
-    shift_kernel = np.zeros((9, 5), dtype=np.uint8)
-    shift_kernel[4:, :] = 1          # only expand downward
+    alpha_np = cv2.erode(alpha_np, sym_kernel, iterations=1)
 
-    alpha_np = cv2.dilate(alpha_np, shift_kernel, iterations=2)
-
-    # Cap at original image boundary
-    alpha_np = np.clip(alpha_np, 0, 255).astype(np.uint8)
-
-    alpha = Image.fromarray(alpha_np)
+    alpha = Image.fromarray(alpha_np.astype(np.uint8))
 
     # =====================================================
-    # SLIGHT EDGE SMOOTHING
+    # FEATHERED EDGES — soft Gaussian fade instead of
+    # a hard binary cut so any remaining edge pixels
+    # blend gradually with the white ID background.
     # =====================================================
-    alpha = alpha.filter(
-        ImageFilter.MedianFilter(size=3)
-    )
+    alpha = alpha.filter(ImageFilter.GaussianBlur(radius=1))
 
     output.putalpha(alpha)
 
