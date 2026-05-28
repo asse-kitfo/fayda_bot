@@ -1111,6 +1111,20 @@ def process_ocr(image_path, confirm=True, debug_dir="temp"):
         name_am = crop_name_am
 
     # =========================================
+    # STRIP OCR ARTEFACTS FROM DATE STRINGS
+    # Remove any character that is not a digit, ASCII letter, or slash.
+    # This eliminates Amharic/Unicode OCR bleed that causes strings like
+    # "17/08/1982ሃ" to pass is_date() (re.match) but fail suspicious().
+    # =========================================
+    def _clean_date(s):
+        return re.sub(r"[^0-9A-Za-z/]", "", s or "")
+
+    dob_greg = _clean_date(dob_greg)
+    dob_eth  = _clean_date(dob_eth)
+    exp_greg = _clean_date(exp_greg)
+    exp_eth  = _clean_date(exp_eth)
+
+    # =========================================
     # REPAIR GARBLED GREGORIAN MONTHS
     # OCR often garbles Latin month names (e.g. May→እ48ሃ)
     # when Amharic+English mode confuses scripts.
