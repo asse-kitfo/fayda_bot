@@ -3,6 +3,7 @@ from PIL import Image, ImageDraw, ImageFont
 import os
 import json
 import cv2
+import threading
 
 # =========================================================
 # PATH
@@ -118,46 +119,49 @@ def format_fin(fin):
 # CARD NUMBER COUNTER
 # =========================================================
 COUNTER_FILE = path("card_counter.json")
+_counter_lock = threading.Lock()
 
 def generate_card_number():
 
-    # create file if missing
-    if not os.path.exists(COUNTER_FILE):
+    with _counter_lock:
 
+        # create file if missing
+        if not os.path.exists(COUNTER_FILE):
+
+            with open(COUNTER_FILE, "w") as f:
+
+                json.dump(
+                    {
+                        "last_number": 20038464
+                    },
+                    f
+                )
+
+        # read current number
+        with open(COUNTER_FILE, "r") as f:
+
+            data = json.load(f)
+
+        current = data.get(
+            "last_number",
+            20038464
+        )
+
+        # increment
+        new_number = current + 1
+
+        # save updated number
         with open(COUNTER_FILE, "w") as f:
 
             json.dump(
                 {
-                    "last_number": 20038464
+                    "last_number": new_number
                 },
                 f
             )
 
-    # read current number
-    with open(COUNTER_FILE, "r") as f:
-
-        data = json.load(f)
-
-    current = data.get(
-        "last_number",
-        20038464
-    )
-
-    # increment
-    new_number = current + 1
-
-    # save updated number
-    with open(COUNTER_FILE, "w") as f:
-
-        json.dump(
-            {
-                "last_number": new_number
-            },
-            f
-        )
-
-    # return 8 digits
-    return str(new_number).zfill(8)
+        # return 8 digits
+        return str(new_number).zfill(8)
 
 # =========================================================
 # GENERATE BACK

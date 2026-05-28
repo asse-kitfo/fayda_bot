@@ -1,10 +1,13 @@
 import json
 import os
 import time
+import threading
 
 USERS_FILE = "users.json"
 
 ADMINS = {"sonof_virginmary"}
+
+_lock = threading.Lock()
 
 
 # =========================================================
@@ -30,29 +33,30 @@ def _save(data):
 # have an up-to-date user_id ↔ username mapping
 # =========================================================
 def register(user_id: int, username: str | None):
-    data = _load()
-    uid = str(user_id)
-    uname = (username or "").lower().strip("@")
+    with _lock:
+        data = _load()
+        uid = str(user_id)
+        uname = (username or "").lower().strip("@")
 
-    if uid not in data["users"]:
-        data["users"][uid] = {
-            "username": uname,
-            "points": 0,
-            "unlimited": False,
-            "first_seen": time.time()
-        }
-    else:
+        if uid not in data["users"]:
+            data["users"][uid] = {
+                "username": uname,
+                "points": 0,
+                "unlimited": False,
+                "first_seen": time.time()
+            }
+        else:
+            if uname:
+                data["users"][uid]["username"] = uname
+
         if uname:
-            data["users"][uid]["username"] = uname
+            data["usernames"][uname] = uid
 
-    if uname:
-        data["usernames"][uname] = uid
+        # auto-grant unlimited for admins
+        if uname in ADMINS:
+            data["users"][uid]["unlimited"] = True
 
-    # auto-grant unlimited for admins
-    if uname in ADMINS:
-        data["users"][uid]["unlimited"] = True
-
-    _save(data)
+        _save(data)
 
 
 # =========================================================
@@ -89,12 +93,13 @@ def get_points(user_id: int) -> int | None:
 # DEDUCT — called after a complete front+back generation
 # =========================================================
 def deduct_point(user_id: int):
-    data = _load()
-    u = data["users"].get(str(user_id))
-    if not u or u.get("unlimited", False):
-        return
-    u["points"] = max(0, u.get("points", 0) - 1)
-    _save(data)
+    with _lock:
+        data = _load()
+        u = data["users"].get(str(user_id))
+        if not u or u.get("unlimited", False):
+            return
+        u["points"] = max(0, u.get("points", 0) - 1)
+        _save(data)
 
 
 # =========================================================
@@ -105,48 +110,50 @@ def grant(target_username: str, amount) -> str:
     amount: int for points, or the string 'unlimited'.
     Returns a human-readable result message.
     """
-    data = _load()
-    uname = target_username.lower().strip("@")
-    uid = data["usernames"].get(uname)
+    with _lock:
+        data = _load()
+        uname = target_username.lower().strip("@")
+        uid = data["usernames"].get(uname)
 
-    if not uid:
-        return f"❌ User @{uname} not found. They must send /start first."
+        if not uid:
+            return f"❌ User @{uname} not found. They must send /start first."
 
-    u = data["users"][uid]
+        u = data["users"][uid]
 
-    if amount == "unlimited":
-        u["unlimited"] = True
-        u["points"] = 0
+        if amount == "unlimited":
+            u["unlimited"] = True
+            u["points"] = 0
+            _save(data)
+            return f"✅ @{uname} now has unlimited access."
+
+        try:
+            n = int(amount)
+        except ValueError:
+            return "❌ Amount must be a number or 'unlimited'."
+
+        u["unlimited"] = False
+        u["points"] = u.get("points", 0) + n
         _save(data)
-        return f"✅ @{uname} now has unlimited access."
-
-    try:
-        n = int(amount)
-    except ValueError:
-        return "❌ Amount must be a number or 'unlimited'."
-
-    u["unlimited"] = False
-    u["points"] = u.get("points", 0) + n
-    _save(data)
-    return f"✅ @{uname} now has {u['points']} point(s) (+{n})."
+        return f"✅ @{uname} now has {u['points']} point(s) (+{n})."
 
 
 # =========================================================
 # ADMIN: REVOKE ALL ACCESS
 # =========================================================
 def revoke(target_username: str) -> str:
-    data = _load()
-    uname = target_username.lower().strip("@")
-    uid = data["usernames"].get(uname)
+    with _lock:
+        data = _load()
+        uname = target_username.lower().strip("@")
+        uid = data["usernames"].get(uname)
 
-    if not uid:
-        return f"❌ User @{uname} not found."
+        if not uid:
+            return f"❌ User @{uname} not found."
 
-    u = data["users"][uid]
-    u["unlimited"] = False
-    u["points"] = 0
-    _save(data)
-    return f"✅ Access revoked for @{uname}."
+        u = data["users"][uid]
+        u["unlimited"] = False
+        u["points"] = 0
+        _save(data)
+        return f"✅ Access revoked for @{uname}."
 
 
 # =========================================================
@@ -161,24 +168,26 @@ def get_template(user_id: int) -> str:
 
 
 def set_template(user_id: int, template_id: str):
-    data = _load()
-    uid = str(user_id)
-    if uid in data["users"]:
-        data["users"][uid]["template"] = template_id
-        _save(data)
+    with _lock:
+        data = _load()
+        uid = str(user_id)
+        if uid in data["users"]:
+            data["users"][uid]["template"] = template_id
+            _save(data)
 
 
 def reassign_template(from_tid: str, to_tid: str) -> int:
     """Move all users on from_tid to to_tid. Returns count of affected users."""
-    data = _load()
-    count = 0
-    for u in data["users"].values():
-        if u.get("template", "a") == from_tid:
-            u["template"] = to_tid
-            count += 1
-    if count:
-        _save(data)
-    return count
+    with _lock:
+        data = _load()
+        count = 0
+        for u in data["users"].values():
+            if u.get("template", "a") == from_tid:
+                u["template"] = to_tid
+                count += 1
+        if count:
+            _save(data)
+        return count
 
 
 # =========================================================

@@ -196,7 +196,7 @@ def run_ocr_variants(
 # =========================================================
 # AUTO CROP CARD FROM SCREENSHOT
 # =========================================================
-def crop_card(image_path):
+def crop_card(image_path, debug_dir=None):
 
     img = cv2.imread(image_path)
 
@@ -247,7 +247,7 @@ def crop_card(image_path):
 
     crop = img[y:y+h, x:x+w]
 
-    cv2.imwrite("debug_back_crop.jpg", crop)
+    save_debug(debug_dir, "debug_back_crop.jpg", crop)
 
     print("✅ Card cropped")
 
@@ -355,14 +355,14 @@ def extract_qr(card_img, ocr_data, debug_dir=None):
 # =========================================================
 # OCR ONLY LOWER AREA
 # =========================================================
-def extract_text_area(card_img):
+def extract_text_area(card_img, debug_dir=None):
 
     h, w = card_img.shape[:2]
 
     # bottom area only
     bottom = card_img[int(h * 0.45):h, :]
 
-    cv2.imwrite("debug_bottom.jpg", bottom)
+    save_debug(debug_dir, "debug_bottom.jpg", bottom)
 
     gray = cv2.cvtColor(bottom, cv2.COLOR_BGR2GRAY)
 
@@ -381,7 +381,7 @@ def extract_text_area(card_img):
         cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
 
-    cv2.imwrite("debug_bottom_processed.jpg", gray)
+    save_debug(debug_dir, "debug_bottom_processed.jpg", gray)
 
     text = pytesseract.image_to_string(
         gray,
@@ -512,7 +512,7 @@ def extract_fin(card_img, ocr_data, debug_dir=None):
 # =========================================================
 # PHONE EXTRACTOR
 # =========================================================
-def extract_phone(card_img, ocr_data):
+def extract_phone(card_img, ocr_data, debug_dir=None):
 
     h, w = card_img.shape[:2]
 
@@ -571,7 +571,7 @@ def extract_phone(card_img, ocr_data):
         int(cw * 0.04):int(cw * 0.96)
     ]
 
-    cv2.imwrite("debug_phone_crop.jpg", crop)
+    save_debug(debug_dir, "debug_phone_crop.jpg", crop)
 
     print(
         f"📦 PHONE CROP: "
@@ -611,10 +611,7 @@ def extract_phone(card_img, ocr_data):
         cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
 
-    cv2.imwrite(
-        "debug_phone_processed.jpg",
-        gray
-    )
+    save_debug(debug_dir, "debug_phone_processed.jpg", gray)
 
     # =========================================
     # OCR DIGITS ONLY
@@ -670,7 +667,7 @@ def extract_phone(card_img, ocr_data):
 # =========================================================
 # WOREDA EXTRACTOR
 # =========================================================
-def extract_woreda(card_img, ocr_data):
+def extract_woreda(card_img, ocr_data, debug_dir=None):
 
     h, w = card_img.shape[:2]
 
@@ -715,7 +712,7 @@ def extract_woreda(card_img, ocr_data):
 
     crop = card_img[y1:y2, x1:x2]
 
-    cv2.imwrite("debug_woreda_crop.jpg", crop)
+    save_debug(debug_dir, "debug_woreda_crop.jpg", crop)
 
     print(
         f"📦 WOREDA CROP: "
@@ -758,10 +755,7 @@ def extract_woreda(card_img, ocr_data):
         kernel
     )
 
-    cv2.imwrite(
-        "debug_woreda_processed.jpg",
-        gray
-    )
+    save_debug(debug_dir, "debug_woreda_processed.jpg", gray)
 
     # =========================================
     # OCR TEXT
@@ -1300,31 +1294,31 @@ def validate_back_data(data):
 # =========================================================
 # MAIN
 # =========================================================
-def process_back_ocr(image_path, confirm=True):
+def process_back_ocr(image_path, confirm=True, debug_dir=None):
 
     # crop card
-    card = crop_card(image_path)
+    card = crop_card(image_path, debug_dir=debug_dir)
     
     # shared OCR box data
     ocr_data = get_ocr_data(card)
 
     # qr crop
-    qr = extract_qr(card, ocr_data)
+    qr = extract_qr(card, ocr_data, debug_dir=debug_dir)
 
     # text
-    text = extract_text_area(card)
+    text = extract_text_area(card, debug_dir=debug_dir)
 
     # fin
-    fin = extract_fin(card, ocr_data)
+    fin = extract_fin(card, ocr_data, debug_dir=debug_dir)
     
     # phone
-    phone = extract_phone(card, ocr_data)    
+    phone = extract_phone(card, ocr_data, debug_dir=debug_dir)
 
     # parse
     data = parse_back(text)
 
     # dedicated woreda extractor
-    woreda = extract_woreda(card, ocr_data)
+    woreda = extract_woreda(card, ocr_data, debug_dir=debug_dir)
 
     if woreda:
         data["woreda"] = woreda

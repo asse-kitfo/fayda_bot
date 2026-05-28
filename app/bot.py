@@ -958,10 +958,11 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text("🔍 Processing front ID...")
 
-            front_data = process_ocr(
+            front_data = await asyncio.to_thread(
+                process_ocr,
                 file_path,
-                confirm=False,
-                debug_dir=user_temp
+                False,
+                user_temp
             )
 
             if front_data.get("problems"):
@@ -1057,12 +1058,13 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             front_data   = session["front_data"]
             front_output = f"temp/{user_id}/front_{session['job_id']}.tif"
 
-            front_path = generate_id(
+            front_path = await asyncio.to_thread(
+                generate_id,
                 front_data,
                 file_path,
                 front_output,
-                debug_dir=user_temp,
-                template_id=session.get("template_id", "a")
+                user_temp,
+                session.get("template_id", "a")
             )
 
             if not front_path:
@@ -1134,7 +1136,12 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await safe_reply(update.message.reply_text, "🔍 Processing back side...")
 
-            back_data, qr_crop = process_back_ocr(file_path)
+            back_data, qr_crop = await asyncio.to_thread(
+                process_back_ocr,
+                file_path,
+                True,
+                user_temp
+            )
 
             if (
                 not back_data
@@ -1171,12 +1178,13 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             person_name = front_data.get("name_en", "unknown")
             back_output = f"temp/{user_id}/back_{session['job_id']}.tif"
 
-            back_path = generate_back(
+            back_path = await asyncio.to_thread(
+                generate_back,
                 back_data,
                 qr_crop,
                 back_output,
                 person_name,
-                template_id=session.get("template_id", "a")
+                session.get("template_id", "a")
             )
 
             session["back_generated"]  = True
@@ -1241,6 +1249,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     finally:
         if user_id is not None:
+            session = user_sessions.get(user_id)
+            if session:
+                session["front_processing"] = False
+                session["back_processing"] = False
             now = time.time()
             for key, ts in list(processed_files.items()):
                 if now - ts > 120:
@@ -1288,10 +1300,28 @@ def main():
     async def _cleanup_job(context):
         cleanup_old_dirs(30)
 
+    async def _sweep_sessions(context):
+        now = time.time()
+        expired = [
+            uid for uid, s in list(user_sessions.items())
+            if now - s.get("created_at", 0) > SESSION_TIMEOUT
+        ]
+        for uid in expired:
+            user_sessions.pop(uid, None)
+            processing_users.discard(uid)
+        if expired:
+            print(f"🧹 Swept {len(expired)} expired session(s)")
+
     app.job_queue.run_repeating(
         _cleanup_job,
         interval=600,
         first=600
+    )
+
+    app.job_queue.run_repeating(
+        _sweep_sessions,
+        interval=SESSION_TIMEOUT,
+        first=SESSION_TIMEOUT
     )
 
     print("🚀 Initializing OCR and segmentation models...")
