@@ -1145,6 +1145,13 @@ def process_ocr(image_path, confirm=True, debug_dir="temp"):
                       f" (dob_greg={dob_greg!r}, computed={computed_greg!r})")
                 dob_eth = repaired_eth
 
+    # If dob_greg is valid but dob_eth is missing, derive it
+    if dob_greg and not _needs_month_repair(dob_greg) and not dob_eth:
+        derived = greg_to_eth(dob_greg)
+        if derived:
+            print(f"🔧 Derived missing dob_eth from dob_greg: {derived!r}")
+            dob_eth = derived
+
     # =========================================
     # CROSS-VALIDATE exp_eth ↔ exp_greg
     # Same approach: if exp_eth converts to a different year/month
