@@ -923,6 +923,14 @@ def parse_back(text):
             "central ethiopia" in low
             or ("centr" in low and "ethiopia" in low)
             or ("centrat" in low and "ethiopia" in low)
+            # OCR garbles "Central" into noise but keeps "Ethiopia Region"
+            or (
+                "ethiopia region" in low
+                and "addis" not in low
+                and "ethiopian" not in low
+            )
+            # Amharic "ማዕከላዊ" = Central — reliable even when English is garbled
+            or "ማዕከላዊ" in line
         ):
 
             data["region"] = "Central Ethiopia Region"
