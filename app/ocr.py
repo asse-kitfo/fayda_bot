@@ -659,13 +659,29 @@ def parse_text(text):
     date_pairs = []
 
     for i in range(anchor_i, len(lines)):
-        if "|" not in lines[i]:
-            continue
+        line = lines[i]
 
-        left, right = split_lr(lines[i])
+        # Normalise OCR misreads of the | separator (l, I, 1 flanked by date chars)
+        norm_line = re.sub(
+            r'(?<=[0-9A-Za-z])\s*[lI]\s*(?=[0-9A-Za-z])',
+            ' | ',
+            line
+        )
 
-        if is_date(left) or is_date(right):
-            date_pairs.append((normalize(left), normalize(right)))
+        if "|" in norm_line:
+            left, right = split_lr(norm_line)
+            if is_date(left) or is_date(right):
+                date_pairs.append((normalize(left), normalize(right)))
+                continue
+
+        # Last-resort fallback: two date-like patterns on the same line with
+        # no recognisable separator (e.g. OCR dropped | entirely)
+        raw_dates = re.findall(
+            r'\d{4}/(?:[A-Za-z]{3}|\d{2})/\d{2}',
+            line
+        )
+        if len(raw_dates) >= 2:
+            date_pairs.append((normalize(raw_dates[0]), normalize(raw_dates[1])))
 
     if len(date_pairs) >= 1:
 
