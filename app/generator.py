@@ -332,51 +332,80 @@ def remove_background(image):
 
     output = output.convert("RGBA")
 
-    r, g, b, a = output.split()
+    r_ch, g_ch, b_ch, a_ch = output.split()
+
+    r_arr = np.array(r_ch, dtype=np.float32)
+    g_arr = np.array(g_ch, dtype=np.float32)
+    b_arr = np.array(b_ch, dtype=np.float32)
+    a_arr = np.array(a_ch, dtype=np.uint8)
 
     # =====================================================
-    # CLEAN TRANSPARENCY — keep only confident pixels
-    # (threshold 170) so no background-colored pixels
-    # enter the mask at this stage.
+    # SAFE FOREGROUND MASK — only pixels u2net is
+    # confident about (threshold 170).  These have clean
+    # person colours with no background contamination.
     # =====================================================
-    alpha = a.point(
-        lambda p: 255 if p > 170 else 0
-    )
-
-    alpha_np = np.array(alpha, dtype=np.uint8)
+    safe_mask = (a_arr > 170).astype(np.float32)   # 1.0 = safe
 
     # =====================================================
-    # DOWNWARD DILATION — recover shoulder pixels that
-    # u2net marks near-transparent at the bottom edge.
-    # Asymmetric kernel: expands only downward.
+    # DOWNWARD DILATION — recover shoulder bottom.
+    # We work on the safe mask, not the blurred alpha.
     # =====================================================
     down_kernel = np.zeros((9, 5), dtype=np.uint8)
     down_kernel[4:, :] = 1
 
-    alpha_np = cv2.dilate(alpha_np, down_kernel, iterations=3)
+    safe_bin = (safe_mask * 255).astype(np.uint8)
+    dilated  = cv2.dilate(safe_bin, down_kernel, iterations=3)
+
+    # Fringe: pixels added by dilation that weren't safe
+    fringe_mask = (dilated == 255) & (safe_bin == 0)
 
     # =====================================================
-    # EROSION — strip the single outer ring of dark
-    # background-colored fringe pixels introduced by the
-    # dilation, eliminating the black border artefact.
-    # Net result: shoulder recovered, dark border removed.
+    # COLOUR DECONTAMINATION — spread safe foreground
+    # colours into the fringe so those pixels carry the
+    # person's own colour instead of dark background.
+    #
+    # Method: Gaussian-blur both the masked colour and
+    # the mask itself, then normalise (pull-colour).
+    # Blur radius 25 px reaches well into the fringe.
     # =====================================================
-    sym_kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE, (3, 3)
-    )
+    blur_r = 25
 
-    alpha_np = cv2.erode(alpha_np, sym_kernel, iterations=1)
+    for arr in [r_arr, g_arr, b_arr]:
+        # Zero out background so it doesn't bleed in
+        masked = (arr * safe_mask).astype(np.float32)
 
-    alpha = Image.fromarray(alpha_np.astype(np.uint8))
+        ch_img    = Image.fromarray(np.clip(masked, 0, 255).astype(np.uint8))
+        mask_img  = Image.fromarray((safe_mask * 255).astype(np.uint8))
+
+        ch_blur   = np.array(
+            ch_img.filter(ImageFilter.GaussianBlur(blur_r)),
+            dtype=np.float32
+        )
+        mask_blur = np.array(
+            mask_img.filter(ImageFilter.GaussianBlur(blur_r)),
+            dtype=np.float32
+        ) / 255.0
+
+        # Avoid div-by-zero far from the person
+        mask_blur = np.clip(mask_blur, 1e-3, 1.0)
+        spread    = np.clip(ch_blur / mask_blur, 0, 255)
+
+        # Replace fringe pixels with spread colour
+        arr[fringe_mask] = spread[fringe_mask]
 
     # =====================================================
-    # FEATHERED EDGES — soft Gaussian fade instead of
-    # a hard binary cut so any remaining edge pixels
-    # blend gradually with the white ID background.
+    # FINAL ALPHA — dilated mask with soft edge fade
     # =====================================================
-    alpha = alpha.filter(ImageFilter.GaussianBlur(radius=1))
+    alpha_final = Image.fromarray(dilated)
+    alpha_final = alpha_final.filter(ImageFilter.GaussianBlur(radius=1))
 
-    output.putalpha(alpha)
+    # Rebuild RGBA with decontaminated colours
+    output = Image.merge("RGBA", (
+        Image.fromarray(np.clip(r_arr, 0, 255).astype(np.uint8)),
+        Image.fromarray(np.clip(g_arr, 0, 255).astype(np.uint8)),
+        Image.fromarray(np.clip(b_arr, 0, 255).astype(np.uint8)),
+        alpha_final
+    ))
 
     return output
 
