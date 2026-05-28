@@ -320,6 +320,8 @@ def extract_face(image_path):
 # =========================================================
 def remove_background(image):
 
+    import numpy as np
+
     # =====================================================
     # REMOVE BG USING GPU SESSION
     # =====================================================
@@ -334,10 +336,34 @@ def remove_background(image):
 
     # =====================================================
     # CLEAN TRANSPARENCY
+    # Lower threshold (128 vs old 170) so semi-transparent
+    # shoulder/edge pixels are kept rather than erased.
     # =====================================================
     alpha = a.point(
-        lambda p: 255 if p > 170 else 0
+        lambda p: 255 if p > 128 else 0
     )
+
+    # =====================================================
+    # DOWNWARD DILATION — recover shoulder pixels that
+    # u2net marks near-transparent at the bottom edge.
+    # Uses an asymmetric kernel: taller below than above.
+    # =====================================================
+    alpha_np = np.array(alpha, dtype=np.uint8)
+
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (5, 5)
+    )
+
+    # Shift mask down by 4 px so shoulder base is filled
+    shift_kernel = np.zeros((9, 5), dtype=np.uint8)
+    shift_kernel[4:, :] = 1          # only expand downward
+
+    alpha_np = cv2.dilate(alpha_np, shift_kernel, iterations=2)
+
+    # Cap at original image boundary
+    alpha_np = np.clip(alpha_np, 0, 255).astype(np.uint8)
+
+    alpha = Image.fromarray(alpha_np)
 
     # =====================================================
     # SLIGHT EDGE SMOOTHING
