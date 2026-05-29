@@ -334,68 +334,52 @@ def remove_background(image):
     # =====================================================
     # ALPHA CLEANUP  (OpenCV morphological pipeline)
     #
-    # Problem A — white/coloured border around head:
-    #   Binarise the mask so no background-contaminated
-    #   semi-transparent pixels survive into the composite.
+    # Key insight: rembg composites its output against black,
+    # so any pixel it calls "background" has RGB=(0,0,0).
+    # When the morphological close expands the mask into
+    # those pixels the underlying colour is black → black fill.
     #
-    # Problem B — parts of the person cut off / black fill:
-    #   Morphological CLOSE fills internal gaps.  But those
-    #   gap pixels had alpha=0 from u2net so their RGB is
-    #   black.  Before touching the alpha, dilate the
-    #   foreground RGB outward so every gap pixel gets the
-    #   colour of the nearest foreground pixel — no black.
+    # Fix: use the ORIGINAL input image as the RGB source.
+    # It has correct colours at every pixel (including the
+    # body parts the model mis-labelled as background).
+    # Only rembg's alpha channel is used — as the raw mask.
     #
-    # Problem C — hard edge after binarisation:
-    #   Erode inward then Gaussian-blur back outward so the
-    #   feathered edge only samples foreground colours.
-    #   BORDER_REPLICATE throughout prevents corner body
-    #   pixels from being eaten by the kernel border.
+    # Pipeline:
+    #   1  Binarise mask at 20                (no background bleed)
+    #   2  Morphological CLOSE                (fill internal gaps)
+    #   3  Erode inward                       (keep blur inside person)
+    #   4  Gaussian blur                      (feather edge naturally)
+    #   5  Combine original RGB + clean alpha
     # =====================================================
 
-    img_np  = np.array(output)            # H×W×4  RGBA
-    rgb_np  = img_np[:, :, :3].copy()     # H×W×3  RGB
-    alpha_np = img_np[:, :, 3]            # H×W    alpha
+    orig_np  = np.array(image.convert("RGB"))   # original — correct colours everywhere
+    alpha_np = np.array(output)[:, :, 3]        # rembg mask only
 
-    # ── Step 0: propagate foreground RGB into black gaps ──
-    # Pixels where u2net had alpha=0 are RGB=(0,0,0).
-    # Dilate each foreground colour channel so those gap
-    # pixels receive the colour of the nearest valid pixel.
-    fg_mask = (alpha_np > 20).astype(np.uint8)
-    k_rgb   = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-    rgb_filled = rgb_np.copy()
-    for c in range(3):
-        fg_ch      = np.where(fg_mask, rgb_np[:, :, c], np.uint8(0))
-        dilated_ch = cv2.dilate(fg_ch, k_rgb, borderType=cv2.BORDER_REPLICATE)
-        rgb_filled[:, :, c] = np.where(fg_mask, rgb_np[:, :, c], dilated_ch)
-
-    # ── Step 1: binarise alpha ────────────────────────────
+    # ── 1: binarise ──────────────────────────────────────
     _, alpha_bin = cv2.threshold(alpha_np, 20, 255, cv2.THRESH_BINARY)
 
-    # ── Step 2: morphological CLOSE (fill internal holes) ─
+    # ── 2: CLOSE — fill internal holes (fixes cuts) ──────
     k_close      = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     alpha_closed = cv2.morphologyEx(
         alpha_bin, cv2.MORPH_CLOSE, k_close,
         borderType=cv2.BORDER_REPLICATE
     )
 
-    # ── Step 3: erode inward (keeps blur inside person) ───
+    # ── 3: erode inward so blur stays inside person ──────
     k_erode      = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     alpha_eroded = cv2.erode(
         alpha_closed, k_erode,
         borderType=cv2.BORDER_REPLICATE
     )
 
-    # ── Step 4: Gaussian blur — feathers edge outward ~4px ─
+    # ── 4: Gaussian blur feathers edge outward ~4 px ─────
     alpha_feathered = cv2.GaussianBlur(
         alpha_eroded, (7, 7), 2,
         borderType=cv2.BORDER_REPLICATE
     )
 
-    # ── Combine pre-coloured RGB with processed alpha ─────
-    result_np = np.dstack([
-        rgb_filled,
-        alpha_feathered.astype(np.uint8)
-    ])
+    # ── 5: original RGB + clean alpha ────────────────────
+    result_np = np.dstack([orig_np, alpha_feathered.astype(np.uint8)])
     return Image.fromarray(result_np, "RGBA")
 
 # =========================================================
