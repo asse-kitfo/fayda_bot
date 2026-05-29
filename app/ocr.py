@@ -236,23 +236,10 @@ def is_gregorian_date(x):
 
     x = normalize(x)
 
-    # Gregorian usually contains English month abbreviation
-    if bool(re.search(r"[A-Za-z]{3}", x)):
-        return True
-
-    # OCR sometimes garbles the English month name into Amharic characters.
-    # Ethiopian dates always have a pure-numeric month field.
-    # If the middle segment of a YYYY/MM/DD or DD/MM/YYYY date is non-numeric
-    # it was originally an English month name → treat as Gregorian.
-    parts = x.split("/")
-    if len(parts) == 3:
-        # Check both YYYY/MM/DD and DD/MM/YYYY layouts:
-        # middle segment is parts[1] in both cases.
-        middle = parts[1].strip()
-        if middle and not middle.isdigit():
-            return True
-
-    return False
+    # Gregorian usually contains English month
+    return bool(
+        re.search(r"[A-Za-z]{3}", x)
+    )
 
 
 def is_ethiopian_date(x):
@@ -1115,10 +1102,6 @@ def fix_english_l_from_amharic(name_en, name_am):
         return name_en
 
     fixed_parts = []
-    # Consonants that can follow 'l' in an Amharic transliteration.
-    # An 'i' sandwiched between 'l' and one of these is a spurious OCR insert.
-    _CONSONANTS = set("bcdfghjklmnpqrstvwxyz")
-
     for en_word, am_word in zip(en_parts, am_parts):
         if (
             "ል" in am_word
@@ -1137,7 +1120,7 @@ def fix_english_l_from_amharic(name_en, name_am):
                 replacement = "L" if second_i.isupper() else "l"
                 fixed = en_word[: idx + 1] + replacement + en_word[idx + 2 :]
             else:
-                # Single 'i' (no double) — it is entirely OCR's misread of ል.
+                # Single 'i' (no double) — it is entirely OCR's misread of ל.
                 # e.g. "Barkign" → "Barklgn"
                 fixed = "".join(
                     "l" if ch == "i" else "L" if ch == "I" else ch
@@ -1146,40 +1129,6 @@ def fix_english_l_from_amharic(name_en, name_am):
 
             print(f"🔧 l/i fix: {en_word!r} → {fixed!r}  (am: {am_word!r})")
             fixed_parts.append(fixed)
-
-        elif (
-            "ል" in am_word
-            and "l" in en_word.lower()
-            and "li" in en_word.lower()
-        ):
-            # ል is present and 'l' is already correct in the English, but OCR
-            # also inserted a phantom 'i' right after 'l' before a consonant.
-            # e.g. "abdliselam" → "abdlselam"  (Amharic: አብድልሰላም)
-            lower = en_word.lower()
-            result = []
-            idx = 0
-            changed = False
-            while idx < len(lower):
-                if (
-                    lower[idx] == "l"
-                    and idx + 1 < len(lower)
-                    and lower[idx + 1] == "i"
-                    and idx + 2 < len(lower)
-                    and lower[idx + 2] in _CONSONANTS
-                ):
-                    result.append(en_word[idx])
-                    idx += 2
-                    changed = True
-                else:
-                    result.append(en_word[idx])
-                    idx += 1
-            if changed:
-                fixed = "".join(result)
-                print(f"🔧 phantom-i fix: {en_word!r} → {fixed!r}  (am: {am_word!r})")
-                fixed_parts.append(fixed)
-            else:
-                fixed_parts.append(en_word)
-
         else:
             fixed_parts.append(en_word)
 
