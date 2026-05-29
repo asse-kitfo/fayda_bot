@@ -352,7 +352,9 @@ def remove_background(image):
     #   5  Combine original RGB + clean alpha
     # =====================================================
 
-    orig_np  = np.array(image.convert("RGB"))   # original — correct colours everywhere
+    # Slice RGB directly from the RGBA array — avoids PIL's convert("RGB")
+    # which composites against black and can shift colours on some builds.
+    orig_np  = np.array(image)[:, :, :3]        # H×W×3  R,G,B — always correct
     alpha_np = np.array(output)[:, :, 3]        # rembg mask only
 
     # ── 1: binarise ──────────────────────────────────────
@@ -766,7 +768,9 @@ def generate_id(data, image_path, output_path, debug_dir="temp", template_id="a"
 
     gray = Image.merge("RGB", (r, g, b)).convert("L")
 
-    stat = ImageStat.Stat(gray)
+    # Compute mean brightness only on foreground pixels (alpha > 0) so the
+    # room/wall background doesn't skew the normalisation factor.
+    stat = ImageStat.Stat(gray, mask=a)
 
     avg = stat.mean[0]
 
