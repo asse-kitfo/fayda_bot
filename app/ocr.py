@@ -1108,10 +1108,25 @@ def fix_english_l_from_amharic(name_en, name_am):
             and "l" not in en_word.lower()
             and "i" in en_word.lower()
         ):
-            fixed = "".join(
-                "l" if ch == "i" else "L" if ch == "I" else ch
-                for ch in en_word
-            )
+            lower = en_word.lower()
+
+            if "ii" in lower:
+                # Two adjacent 'i's: the first is a genuine vowel from the
+                # preceding consonant's vowel form (e.g. ድ → "di"),
+                # the second is OCR's misread of ል → replace only the second.
+                # e.g. "abdiisemed" → "abdilsemed"
+                idx = lower.index("ii")  # position of the first 'i' in "ii"
+                second_i = en_word[idx + 1]
+                replacement = "L" if second_i.isupper() else "l"
+                fixed = en_word[: idx + 1] + replacement + en_word[idx + 2 :]
+            else:
+                # Single 'i' (no double) — it is entirely OCR's misread of ל.
+                # e.g. "Barkign" → "Barklgn"
+                fixed = "".join(
+                    "l" if ch == "i" else "L" if ch == "I" else ch
+                    for ch in en_word
+                )
+
             print(f"🔧 l/i fix: {en_word!r} → {fixed!r}  (am: {am_word!r})")
             fixed_parts.append(fixed)
         else:
