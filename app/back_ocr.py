@@ -184,6 +184,63 @@ def run_ocr_variants(
     )
 
     return best
+
+
+# =========================================================
+# OCR VARIANT COLLECTOR — returns ALL variant texts as list
+# =========================================================
+def run_ocr_all_results(gray, config):
+    """
+    Same image variants as run_ocr_variants but returns every
+    result as a list instead of picking the longest.
+    Used for digit-majority voting.
+    """
+    kernel2 = np.ones((2, 2), np.uint8)
+
+    variants = [
+        gray,
+        255 - gray,
+        cv2.adaptiveThreshold(
+            gray, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY, 31, 2
+        ),
+        cv2.medianBlur(gray, 3),
+        cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel2),
+        cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)[1],
+        cv2.dilate(gray, kernel2, iterations=1),
+    ]
+
+    results = []
+    for variant in variants:
+        text = pytesseract.image_to_string(variant, config=config)
+        results.append(text)
+
+    return results
+
+
+# =========================================================
+# DIGIT MAJORITY VOTE
+# =========================================================
+def _digit_majority_vote(candidates, expected_len):
+    """
+    Given a list of digit-only strings all of exactly expected_len,
+    return the per-position plurality-voted consensus string.
+    Returns None if candidates is empty.
+    """
+    if not candidates:
+        return None
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    result = []
+    for i in range(expected_len):
+        digits_at_pos = [c[i] for c in candidates]
+        best = max(set(digits_at_pos), key=digits_at_pos.count)
+        result.append(best)
+
+    return "".join(result)
 # =========================================================
 # AUTO CROP CARD FROM SCREENSHOT
 # =========================================================
@@ -450,54 +507,41 @@ def extract_fin(card_img, ocr_data, debug_dir=None):
     )
 
     # =========================================
-    # OCR DIGITS ONLY
+    # OCR — 3 PSM modes × 7 image variants = 21 readings
+    # Majority-vote per digit position for max accuracy.
     # =========================================
-    text = run_ocr_variants(
-        gray,
-        (
-            "--oem 3 "
-            "--psm 7 "
-            "-c tessedit_char_whitelist=0123456789"
+    _DIGIT_CFG = "--oem 3 -c tessedit_char_whitelist=0123456789"
+    all_raw = []
+    for psm in (7, 8, 13):
+        all_raw.extend(
+            run_ocr_all_results(gray, f"{_DIGIT_CFG} --psm {psm}")
         )
+
+    # collect all 12-digit sequences from every reading
+    candidates_12 = []
+    for r in all_raw:
+        d = re.sub(r"\D", "", r)
+        for m in re.finditer(r"\d{12}", d):
+            candidates_12.append(m.group())
+
+    print(f"\n🔍 FIN candidates ({len(candidates_12)}): {candidates_12}")
+
+    voted = _digit_majority_vote(candidates_12, 12)
+    if voted:
+        print("✅ FIN VOTED:", voted)
+        return voted
+
+    # fallback: longest partial ≥ 8 digits across all readings
+    all_digits = sorted(
+        [re.sub(r"\D", "", r) for r in all_raw],
+        key=len, reverse=True
     )
-
-    print("\n🔍 FIN RAW:\n")
-    print(repr(text))
-
-    # keep digits only
-    text = re.sub(r"\D", "", text)
-
-    print("\n🔍 FIN CLEANED:\n")
-    print(text)
-
-    # =========================================
-    # FIND FIN
-    # =========================================
-    matches = re.findall(r"\d{12}", text)
-
-    if matches:
-
-        best = max(matches, key=len)
-
-        print("✅ FIN FOUND:", best)
-
-        return best
-
-    # fallback
-    partial = re.findall(r"\d+", text)
-
-    if partial:
-
-        best = max(partial, key=len)
-
-        if len(best) >= 8:
-
-            print("⚠️ PARTIAL FIN:", best)
-
-            return best
+    for d in all_digits:
+        if len(d) >= 8:
+            print("⚠️ PARTIAL FIN:", d)
+            return d
 
     print("❌ FIN NOT FOUND")
-
     return ""
 
 # =========================================================
@@ -573,86 +617,63 @@ def extract_phone(card_img, ocr_data, debug_dir=None):
     # =========================================
     # OCR PREPROCESS
     # =========================================
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-
-    # enlarge
-    gray = cv2.resize(
-        gray,
-        None,
-        fx=8,
-        fy=8,
-        interpolation=cv2.INTER_CUBIC
-    )
-
-    # contrast
-    gray = cv2.convertScaleAbs(
-        gray,
+    gray = preprocess_ocr_crop(
+        crop,
+        scale=8,
         alpha=2.5,
         beta=20
-    )
-
-    # blur
-    gray = cv2.GaussianBlur(gray, (3, 3), 0)
-
-    # threshold
-    _, gray = cv2.threshold(
-        gray,
-        0,
-        255,
-        cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
 
     save_debug(debug_dir, "debug_phone_processed.jpg", gray)
 
     # =========================================
-    # OCR DIGITS ONLY
+    # OCR — 3 PSM modes × 7 image variants = 21 readings
+    # Majority-vote per digit position for max accuracy.
     # =========================================
-    text = run_ocr_variants(
-        gray,
-        (
-            "--oem 3 "
-            "--psm 7 "
-            "-c tessedit_char_whitelist=0123456789"
+    _DIGIT_CFG = "--oem 3 -c tessedit_char_whitelist=0123456789"
+    all_raw = []
+    for psm in (7, 8, 13):
+        all_raw.extend(
+            run_ocr_all_results(gray, f"{_DIGIT_CFG} --psm {psm}")
         )
+
+    # collect all 09XXXXXXXX sequences from every reading
+    candidates_09 = []
+    for r in all_raw:
+        d = re.sub(r"\D", "", r)
+        for m in re.finditer(r"09\d{8}", d):
+            candidates_09.append(m.group())
+
+    print(f"\n🔍 PHONE 09-candidates ({len(candidates_09)}): {candidates_09}")
+
+    voted = _digit_majority_vote(candidates_09, 10)
+    if voted:
+        print("✅ PHONE VOTED:", voted)
+        return voted
+
+    # fallback: any 10-digit sequence (in case 09 prefix was garbled)
+    candidates_10 = []
+    for r in all_raw:
+        d = re.sub(r"\D", "", r)
+        for m in re.finditer(r"\d{10}", d):
+            candidates_10.append(m.group())
+
+    voted10 = _digit_majority_vote(candidates_10, 10)
+    if voted10:
+        print("⚠️ PHONE (no 09 prefix) VOTED:", voted10)
+        return voted10
+
+    # fallback: longest partial ≥ 8 digits across all readings
+    all_digits = sorted(
+        [re.sub(r"\D", "", r) for r in all_raw],
+        key=len, reverse=True
     )
-
-    print("\n🔍 PHONE RAW:\n")
-    print(repr(text))
-
-    # digits only
-    text = re.sub(r"\D", "", text)
-
-    print("\n🔍 PHONE CLEANED:\n")
-    print(text)
-
-    # =========================================
-    # FIND PHONE
-    # =========================================
-    matches = re.findall(r"09\d{8}", text)
-
-    if matches:
-
-        phone = matches[0]
-
-        print("✅ PHONE FOUND:", phone)
-
-        return phone
-
-    # fallback
-    partial = re.findall(r"\d+", text)
-
-    if partial:
-
-        best = max(partial, key=len)
-
-        if len(best) >= 8:
-
-            print("⚠️ PARTIAL PHONE:", best)
-
-            return best
+    for d in all_digits:
+        if len(d) >= 8:
+            print("⚠️ PARTIAL PHONE:", d)
+            return d
 
     print("❌ PHONE NOT FOUND")
-
     return ""
 
 # =========================================================
