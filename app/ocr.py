@@ -1081,6 +1081,45 @@ def fix_amharic_from_english(name_en, name_am):
 
     return " ".join(fixed_parts)
 
+
+def fix_english_l_from_amharic(name_en, name_am):
+    """
+    For each name part (first / father / last) independently:
+      - If the Amharic part contains ል  (the Amharic 'l' consonant)
+        AND the English part has 'i' but no 'l'
+      → replace every i/I with l/L in that part only.
+
+    Example: "Barkign" + Amharic "ባርክልኝ" (has ል) → "Barklgn"
+    Parts that don't meet both conditions are left untouched.
+    """
+    if not name_en or not name_am:
+        return name_en
+
+    en_parts = name_en.split()
+    am_parts = name_am.split()
+
+    if len(en_parts) != len(am_parts):
+        return name_en
+
+    fixed_parts = []
+    for en_word, am_word in zip(en_parts, am_parts):
+        if (
+            "ል" in am_word
+            and "l" not in en_word.lower()
+            and "i" in en_word.lower()
+        ):
+            fixed = "".join(
+                "l" if ch == "i" else "L" if ch == "I" else ch
+                for ch in en_word
+            )
+            print(f"🔧 l/i fix: {en_word!r} → {fixed!r}  (am: {am_word!r})")
+            fixed_parts.append(fixed)
+        else:
+            fixed_parts.append(en_word)
+
+    return " ".join(fixed_parts)
+
+
 # =========================================================
 # MAIN (UNCHANGED)
 # =========================================================
@@ -1285,6 +1324,7 @@ def process_ocr(image_path, confirm=True, debug_dir="temp"):
     # FIX AMHARIC OCR USING ENGLISH
     # =========================================
     name_am = fix_amharic_from_english(name_en, name_am)
+    name_en = fix_english_l_from_amharic(name_en, name_am)
     # =========================================
     # FAN OCR
     # =========================================
