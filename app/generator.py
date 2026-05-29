@@ -361,8 +361,10 @@ def remove_background(image):
 
     alpha_np = np.array(a_ch)
 
-    # 1 — binarise: everything below 80 → 0, rest → 255
-    _, alpha_bin = cv2.threshold(alpha_np, 80, 255, cv2.THRESH_BINARY)
+    # 1 — binarise: threshold at 40 (low-light photos produce
+    #     weaker alpha for valid person pixels; 40 captures them
+    #     while still killing confident-background noise near 0)
+    _, alpha_bin = cv2.threshold(alpha_np, 40, 255, cv2.THRESH_BINARY)
 
     # 2 — morphological CLOSE: dilate 9 px then erode 9 px
     #     fills internal gaps from the model (fixes cuts)
