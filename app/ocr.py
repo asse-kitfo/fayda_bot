@@ -1125,6 +1125,56 @@ def process_ocr(image_path, confirm=True, debug_dir="temp"):
     exp_eth  = _clean_date(exp_eth)
 
     # =========================================
+    # FIX GARBLED MONTH NAMES IN YYYY/Mon/DD DATES
+    # OCR often substitutes digits for look-alike letters in month
+    # abbreviations (e.g. "0ct" instead of "Oct", "1an" → "Jan").
+    # Repair these before any field classification or swap detection.
+    # =========================================
+    _KNOWN_MONTHS = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
+
+    def _fix_month_ocr(s):
+        m = re.match(r"^(\d{4})/([\w]{2,4})/(\d{1,2})$", s)
+        if not m:
+            return s
+        year_part, month_part, day_part = m.groups()
+        cap = month_part.capitalize()
+        if cap in _KNOWN_MONTHS:
+            return f"{year_part}/{cap}/{day_part.zfill(2)}"
+        for digit, letter in [("0", "O"), ("1", "I"), ("5", "S"), ("6", "G")]:
+            candidate = month_part.replace(digit, letter).capitalize()
+            if candidate in _KNOWN_MONTHS:
+                print(f"🔧 Month OCR fix: {month_part!r} → {candidate!r} in {s!r}")
+                return f"{year_part}/{candidate}/{day_part.zfill(2)}"
+        return s
+
+    dob_greg = _fix_month_ocr(dob_greg)
+    dob_eth  = _fix_month_ocr(dob_eth)
+    exp_greg = _fix_month_ocr(exp_greg)
+    exp_eth  = _fix_month_ocr(exp_eth)
+
+    # =========================================
+    # SWAP DETECTION
+    # Gregorian dates are in YYYY/Mon/DD format (alpha month).
+    # Ethiopian dates are in DD/MM/YYYY format (all numeric).
+    # OCR misclassification can put a Gregorian date in the eth field
+    # and vice-versa — detect this and correct the assignment.
+    # =========================================
+    def _is_greg_format(s):
+        return bool(re.match(r"^\d{4}/[A-Za-z]{3}/\d{2}$", s))
+
+    def _is_eth_format(s):
+        return bool(re.match(r"^\d{2}/\d{2}/\d{4}$", s))
+
+    if _is_greg_format(dob_eth) and (_is_eth_format(dob_greg) or not dob_greg):
+        print(f"🔄 Swapping DOB fields: dob_eth={dob_eth!r} ↔ dob_greg={dob_greg!r}")
+        dob_greg, dob_eth = dob_eth, dob_greg
+
+    if _is_greg_format(exp_eth) and (_is_eth_format(exp_greg) or not exp_greg):
+        print(f"🔄 Swapping EXP fields: exp_eth={exp_eth!r} ↔ exp_greg={exp_greg!r}")
+        exp_greg, exp_eth = exp_eth, exp_greg
+
+    # =========================================
     # REPAIR GARBLED GREGORIAN MONTHS
     # OCR often garbles Latin month names (e.g. May→እ48ሃ)
     # when Amharic+English mode confuses scripts.
