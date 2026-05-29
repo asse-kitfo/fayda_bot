@@ -333,24 +333,32 @@ def remove_background(image):
     r_ch, g_ch, b_ch, a_ch = output.split()
 
     # =====================================================
-    # SOFT ALPHA — keep u2net's original partial values
-    # instead of binarizing.  This means shoulder/edge
-    # pixels (alpha 30-220) stay semi-transparent and
-    # blend naturally with the white ID background.
-    # No dilation → no fringe pixels → no border at all.
+    # ALPHA CLEANUP
     #
-    # Mapping:
-    #   0–30   → 0    (noise / confident background)
-    #   31–220 → original value  (soft natural edge)
+    # Step 1 — threshold:
+    #   0–15   → 0    (confident background noise)
+    #   16–220 → original (soft edge, kept for smooth blend)
     #   221+   → 255  (confident foreground)
+    #
+    # Step 2 — erode (MinFilter):
+    #   Shrinks the alpha mask by ~1 px.  This kills the
+    #   1-2 pixel fringe that carries the original
+    #   background colour (wall, outdoor, etc.) and shows
+    #   up as a coloured or white border on the template.
+    #
+    # Step 3 — dilate (MaxFilter):
+    #   Expands the mask back by ~1 px so that body pixels
+    #   lost during erosion are restored.  Together with
+    #   the erosion this is a morphological opening that
+    #   removes thin noise without cutting into real parts
+    #   of the person (ears, shoulders, hair tips).
     # =====================================================
     alpha = a_ch.point(
-        lambda p: 0 if p <= 30 else (255 if p >= 221 else p)
+        lambda p: 0 if p <= 15 else (255 if p >= 221 else p)
     )
 
-    # Light median to remove salt-and-pepper noise without
-    # destroying the soft shoulder transition.
-    alpha = alpha.filter(ImageFilter.MedianFilter(size=3))
+    alpha = alpha.filter(ImageFilter.MinFilter(size=3))
+    alpha = alpha.filter(ImageFilter.MaxFilter(size=3))
 
     output.putalpha(alpha)
 
