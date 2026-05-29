@@ -1,5 +1,6 @@
 from PIL import Image, ImageDraw, ImageFont
 import cv2
+import numpy as np
 import os
 import json
 import re
@@ -333,32 +334,52 @@ def remove_background(image):
     r_ch, g_ch, b_ch, a_ch = output.split()
 
     # =====================================================
-    # ALPHA CLEANUP
+    # ALPHA CLEANUP  (OpenCV morphological pipeline)
     #
-    # Step 1 — threshold:
-    #   0–15   → 0    (confident background noise)
-    #   16–220 → original (soft edge, kept for smooth blend)
-    #   221+   → 255  (confident foreground)
+    # Problem A — white/coloured border around head:
+    #   Soft semi-transparent edge pixels still carry the
+    #   original background colour (wall, skin, etc.).
+    #   When pasted on the white template they appear as
+    #   a visible border ring.
+    #   Fix: binarise the mask — no partial-alpha pixels
+    #   means no background-colour contamination.
     #
-    # Step 2 — erode (MinFilter):
-    #   Shrinks the alpha mask by ~1 px.  This kills the
-    #   1-2 pixel fringe that carries the original
-    #   background colour (wall, outdoor, etc.) and shows
-    #   up as a coloured or white border on the template.
+    # Problem B — parts of the person cut off:
+    #   u2net sometimes leaves gaps inside the silhouette
+    #   (light clothing that blends with background).
+    #   Fix: morphological CLOSE (dilate → erode) with an
+    #   elliptical kernel fills internal holes before
+    #   anything else.
     #
-    # Step 3 — dilate (MaxFilter):
-    #   Expands the mask back by ~1 px so that body pixels
-    #   lost during erosion are restored.  Together with
-    #   the erosion this is a morphological opening that
-    #   removes thin noise without cutting into real parts
-    #   of the person (ears, shoulders, hair tips).
+    # Problem C — hard pixelated edge after binarisation:
+    #   Fix: erode the closed mask inward a few pixels,
+    #   then Gaussian-blur it.  The blur expands back
+    #   outward but stops before reaching background
+    #   pixels, so semi-transparent edge pixels only ever
+    #   sample foreground-coloured pixels — no border.
     # =====================================================
-    alpha = a_ch.point(
-        lambda p: 0 if p <= 15 else (255 if p >= 221 else p)
-    )
 
-    alpha = alpha.filter(ImageFilter.MinFilter(size=3))
-    alpha = alpha.filter(ImageFilter.MaxFilter(size=3))
+    alpha_np = np.array(a_ch)
+
+    # 1 — binarise: everything below 80 → 0, rest → 255
+    _, alpha_bin = cv2.threshold(alpha_np, 80, 255, cv2.THRESH_BINARY)
+
+    # 2 — morphological CLOSE: dilate 9 px then erode 9 px
+    #     fills internal gaps from the model (fixes cuts)
+    k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    alpha_closed = cv2.morphologyEx(alpha_bin, cv2.MORPH_CLOSE, k_close)
+
+    # 3 — erode inward 5 px so the upcoming blur stays
+    #     inside the person boundary (no background bleed)
+    k_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    alpha_eroded = cv2.erode(alpha_closed, k_erode)
+
+    # 4 — Gaussian blur re-feathers the edge outward ~4 px
+    #     (net ≈ −1 px from original), producing a smooth
+    #     transition using only foreground pixel colours
+    alpha_feathered = cv2.GaussianBlur(alpha_eroded, (7, 7), 2)
+
+    alpha = Image.fromarray(alpha_feathered.astype(np.uint8))
 
     output.putalpha(alpha)
 
