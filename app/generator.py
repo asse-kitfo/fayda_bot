@@ -334,54 +334,40 @@ def remove_background(image):
     # =====================================================
     # ALPHA CLEANUP  (OpenCV morphological pipeline)
     #
-    # Key insight: rembg composites its output against black,
-    # so any pixel it calls "background" has RGB=(0,0,0).
-    # When the morphological close expands the mask into
-    # those pixels the underlying colour is black → black fill.
-    #
-    # Fix: use the ORIGINAL input image as the RGB source.
-    # It has correct colours at every pixel (including the
-    # body parts the model mis-labelled as background).
-    # Only rembg's alpha channel is used — as the raw mask.
+    # Fixes white/coloured border around the head that
+    # appears when background-contaminated semi-transparent
+    # pixels survive into the composite.
     #
     # Pipeline:
-    #   1  Binarise mask at 20                (no background bleed)
-    #   2  Morphological CLOSE                (fill internal gaps)
-    #   3  Erode inward                       (keep blur inside person)
-    #   4  Gaussian blur                      (feather edge naturally)
-    #   5  Combine original RGB + clean alpha
+    #   1  Binarise mask at 20  — hard-cut background bleed
+    #   2  Erode inward         — pull edge inside the person
+    #   3  Gaussian blur        — feather edge back outward
+    #                             (samples only foreground px)
     # =====================================================
 
-    # Slice RGB directly from the RGBA array — avoids PIL's convert("RGB")
-    # which composites against black and can shift colours on some builds.
-    orig_np  = np.array(image)[:, :, :3]        # H×W×3  R,G,B — always correct
-    alpha_np = np.array(output)[:, :, 3]        # rembg mask only
+    img_np   = np.array(output)          # H×W×4  RGBA from rembg
+    alpha_np = img_np[:, :, 3]
 
     # ── 1: binarise ──────────────────────────────────────
     _, alpha_bin = cv2.threshold(alpha_np, 20, 255, cv2.THRESH_BINARY)
 
-    # ── 2: CLOSE — fill internal holes (fixes cuts) ──────
-    k_close      = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
-    alpha_closed = cv2.morphologyEx(
-        alpha_bin, cv2.MORPH_CLOSE, k_close,
-        borderType=cv2.BORDER_REPLICATE
-    )
-
-    # ── 3: erode inward so blur stays inside person ──────
+    # ── 2: erode inward ───────────────────────────────────
     k_erode      = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     alpha_eroded = cv2.erode(
-        alpha_closed, k_erode,
+        alpha_bin, k_erode,
         borderType=cv2.BORDER_REPLICATE
     )
 
-    # ── 4: Gaussian blur feathers edge outward ~4 px ─────
+    # ── 3: Gaussian blur feathers edge outward ~4 px ─────
     alpha_feathered = cv2.GaussianBlur(
         alpha_eroded, (7, 7), 2,
         borderType=cv2.BORDER_REPLICATE
     )
 
-    # ── 5: original RGB + clean alpha ────────────────────
-    result_np = np.dstack([orig_np, alpha_feathered.astype(np.uint8)])
+    result_np = np.dstack([
+        img_np[:, :, :3],
+        alpha_feathered.astype(np.uint8)
+    ])
     return Image.fromarray(result_np, "RGBA")
 
 # =========================================================
@@ -768,9 +754,7 @@ def generate_id(data, image_path, output_path, debug_dir="temp", template_id="a"
 
     gray = Image.merge("RGB", (r, g, b)).convert("L")
 
-    # Compute mean brightness only on foreground pixels (alpha > 0) so the
-    # room/wall background doesn't skew the normalisation factor.
-    stat = ImageStat.Stat(gray, mask=a)
+    stat = ImageStat.Stat(gray)
 
     avg = stat.mean[0]
 
