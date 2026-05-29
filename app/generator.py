@@ -361,25 +361,41 @@ def remove_background(image):
 
     alpha_np = np.array(a_ch)
 
-    # 1 — binarise: threshold at 40 (low-light photos produce
-    #     weaker alpha for valid person pixels; 40 captures them
-    #     while still killing confident-background noise near 0)
-    _, alpha_bin = cv2.threshold(alpha_np, 40, 255, cv2.THRESH_BINARY)
+    # 1 — binarise at 20: low-light person pixels can have
+    #     alpha as low as 20–40 from u2net; this threshold
+    #     captures them while still excluding true background
+    #     (which sits near 0)
+    _, alpha_bin = cv2.threshold(alpha_np, 20, 255, cv2.THRESH_BINARY)
 
-    # 2 — morphological CLOSE: dilate 9 px then erode 9 px
-    #     fills internal gaps from the model (fixes cuts)
-    k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-    alpha_closed = cv2.morphologyEx(alpha_bin, cv2.MORPH_CLOSE, k_close)
+    # 2 — morphological CLOSE (dilate 11 → erode 11):
+    #     fills internal gaps from the model (fixes cuts);
+    #     BORDER_REPLICATE keeps foreground pixels that
+    #     touch the image border from being eroded away
+    k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    alpha_closed = cv2.morphologyEx(
+        alpha_bin, cv2.MORPH_CLOSE, k_close,
+        borderType=cv2.BORDER_REPLICATE
+    )
 
-    # 3 — erode inward 5 px so the upcoming blur stays
-    #     inside the person boundary (no background bleed)
+    # 3 — erode inward so the upcoming blur feathers only
+    #     inside the person boundary (prevents background
+    #     colour bleed at edges).  BORDER_REPLICATE means
+    #     body pixels that reach the crop edge (lower-left /
+    #     lower-right corners) are NOT treated as background
+    #     and are not cut by the kernel border.
     k_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
-    alpha_eroded = cv2.erode(alpha_closed, k_erode)
+    alpha_eroded = cv2.erode(
+        alpha_closed, k_erode,
+        borderType=cv2.BORDER_REPLICATE
+    )
 
-    # 4 — Gaussian blur re-feathers the edge outward ~4 px
-    #     (net ≈ −1 px from original), producing a smooth
-    #     transition using only foreground pixel colours
-    alpha_feathered = cv2.GaussianBlur(alpha_eroded, (7, 7), 2)
+    # 4 — Gaussian blur re-feathers the edge outward ~4 px;
+    #     BORDER_REPLICATE also applied here so corner pixels
+    #     are blended correctly rather than clamped to 0
+    alpha_feathered = cv2.GaussianBlur(
+        alpha_eroded, (7, 7), 2,
+        borderType=cv2.BORDER_REPLICATE
+    )
 
     alpha = Image.fromarray(alpha_feathered.astype(np.uint8))
 
