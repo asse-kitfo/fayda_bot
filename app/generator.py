@@ -331,77 +331,72 @@ def remove_background(image):
 
     output = output.convert("RGBA")
 
-    r_ch, g_ch, b_ch, a_ch = output.split()
-
     # =====================================================
     # ALPHA CLEANUP  (OpenCV morphological pipeline)
     #
     # Problem A — white/coloured border around head:
-    #   Soft semi-transparent edge pixels still carry the
-    #   original background colour (wall, skin, etc.).
-    #   When pasted on the white template they appear as
-    #   a visible border ring.
-    #   Fix: binarise the mask — no partial-alpha pixels
-    #   means no background-colour contamination.
+    #   Binarise the mask so no background-contaminated
+    #   semi-transparent pixels survive into the composite.
     #
-    # Problem B — parts of the person cut off:
-    #   u2net sometimes leaves gaps inside the silhouette
-    #   (light clothing that blends with background).
-    #   Fix: morphological CLOSE (dilate → erode) with an
-    #   elliptical kernel fills internal holes before
-    #   anything else.
+    # Problem B — parts of the person cut off / black fill:
+    #   Morphological CLOSE fills internal gaps.  But those
+    #   gap pixels had alpha=0 from u2net so their RGB is
+    #   black.  Before touching the alpha, dilate the
+    #   foreground RGB outward so every gap pixel gets the
+    #   colour of the nearest foreground pixel — no black.
     #
-    # Problem C — hard pixelated edge after binarisation:
-    #   Fix: erode the closed mask inward a few pixels,
-    #   then Gaussian-blur it.  The blur expands back
-    #   outward but stops before reaching background
-    #   pixels, so semi-transparent edge pixels only ever
-    #   sample foreground-coloured pixels — no border.
+    # Problem C — hard edge after binarisation:
+    #   Erode inward then Gaussian-blur back outward so the
+    #   feathered edge only samples foreground colours.
+    #   BORDER_REPLICATE throughout prevents corner body
+    #   pixels from being eaten by the kernel border.
     # =====================================================
 
-    alpha_np = np.array(a_ch)
+    img_np  = np.array(output)            # H×W×4  RGBA
+    rgb_np  = img_np[:, :, :3].copy()     # H×W×3  RGB
+    alpha_np = img_np[:, :, 3]            # H×W    alpha
 
-    # 1 — binarise at 20: low-light person pixels can have
-    #     alpha as low as 20–40 from u2net; this threshold
-    #     captures them while still excluding true background
-    #     (which sits near 0)
+    # ── Step 0: propagate foreground RGB into black gaps ──
+    # Pixels where u2net had alpha=0 are RGB=(0,0,0).
+    # Dilate each foreground colour channel so those gap
+    # pixels receive the colour of the nearest valid pixel.
+    fg_mask = (alpha_np > 20).astype(np.uint8)
+    k_rgb   = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    rgb_filled = rgb_np.copy()
+    for c in range(3):
+        fg_ch      = np.where(fg_mask, rgb_np[:, :, c], np.uint8(0))
+        dilated_ch = cv2.dilate(fg_ch, k_rgb, borderType=cv2.BORDER_REPLICATE)
+        rgb_filled[:, :, c] = np.where(fg_mask, rgb_np[:, :, c], dilated_ch)
+
+    # ── Step 1: binarise alpha ────────────────────────────
     _, alpha_bin = cv2.threshold(alpha_np, 20, 255, cv2.THRESH_BINARY)
 
-    # 2 — morphological CLOSE (dilate 11 → erode 11):
-    #     fills internal gaps from the model (fixes cuts);
-    #     BORDER_REPLICATE keeps foreground pixels that
-    #     touch the image border from being eroded away
-    k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    # ── Step 2: morphological CLOSE (fill internal holes) ─
+    k_close      = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     alpha_closed = cv2.morphologyEx(
         alpha_bin, cv2.MORPH_CLOSE, k_close,
         borderType=cv2.BORDER_REPLICATE
     )
 
-    # 3 — erode inward so the upcoming blur feathers only
-    #     inside the person boundary (prevents background
-    #     colour bleed at edges).  BORDER_REPLICATE means
-    #     body pixels that reach the crop edge (lower-left /
-    #     lower-right corners) are NOT treated as background
-    #     and are not cut by the kernel border.
-    k_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    # ── Step 3: erode inward (keeps blur inside person) ───
+    k_erode      = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     alpha_eroded = cv2.erode(
         alpha_closed, k_erode,
         borderType=cv2.BORDER_REPLICATE
     )
 
-    # 4 — Gaussian blur re-feathers the edge outward ~4 px;
-    #     BORDER_REPLICATE also applied here so corner pixels
-    #     are blended correctly rather than clamped to 0
+    # ── Step 4: Gaussian blur — feathers edge outward ~4px ─
     alpha_feathered = cv2.GaussianBlur(
         alpha_eroded, (7, 7), 2,
         borderType=cv2.BORDER_REPLICATE
     )
 
-    alpha = Image.fromarray(alpha_feathered.astype(np.uint8))
-
-    output.putalpha(alpha)
-
-    return output
+    # ── Combine pre-coloured RGB with processed alpha ─────
+    result_np = np.dstack([
+        rgb_filled,
+        alpha_feathered.astype(np.uint8)
+    ])
+    return Image.fromarray(result_np, "RGBA")
 
 # =========================================================
 # TEXT HELPERS
