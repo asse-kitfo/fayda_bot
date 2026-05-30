@@ -31,6 +31,7 @@ if os.name == "nt":
 
 load_dotenv()
 user_sessions = {}
+_last_front_file_ids: dict = {}   # user_id → file_unique_id of last PAID front screenshot
 
 ADMIN_USERNAME = next(iter(access.ADMINS), "admin")
 
@@ -313,7 +314,11 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             session["front_generated"]  = True
             session["front_processing"] = False
-            access.deduct_point(user_id, 0.5)
+
+            front_fuid = session.get("front_file_unique_id")
+            if _last_front_file_ids.get(user_id) != front_fuid:
+                access.deduct_point(user_id, 0.5)
+                _last_front_file_ids[user_id] = front_fuid
 
             sent = await send_document_with_retry(
                 update.message.reply_document, front_path
@@ -1319,7 +1324,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "created_at": time.time(),
                 "front_processing": False,
                 "back_processing": False,
-                "template_id": saved_template
+                "template_id": saved_template,
+                "front_file_unique_id": telegram_file_id,
             }
 
             await update.message.reply_text(
@@ -1400,7 +1406,11 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             processed_files[cache_key] = time.time()
             session["front_generated"]  = True
             session["front_processing"] = False
-            access.deduct_point(user_id, 0.5)
+
+            front_fuid = session.get("front_file_unique_id")
+            if _last_front_file_ids.get(user_id) != front_fuid:
+                access.deduct_point(user_id, 0.5)
+                _last_front_file_ids[user_id] = front_fuid
 
             sent = await send_document_with_retry(
                 update.message.reply_document, front_path
