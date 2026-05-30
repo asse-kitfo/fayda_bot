@@ -90,15 +90,17 @@ def get_points(user_id: int) -> int | None:
 
 
 # =========================================================
-# DEDUCT — called after a complete front+back generation
+# DEDUCT — call with amount=0.5 per TIF (front or back)
 # =========================================================
-def deduct_point(user_id: int):
+def deduct_point(user_id: int, amount: float = 0.5):
     with _lock:
         data = _load()
         u = data["users"].get(str(user_id))
         if not u or u.get("unlimited", False):
             return
-        u["points"] = max(0, u.get("points", 0) - 1)
+        current = u.get("points", 0)
+        new_val  = max(0, current - amount)
+        u["points"] = round(new_val, 1)
         _save(data)
 
 

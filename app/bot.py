@@ -133,12 +133,14 @@ def done_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Generate Another", callback_data="start_again")],
         [InlineKeyboardButton("🎯 My Points", callback_data="mypoints")],
+        [InlineKeyboardButton("📋 Menu", callback_data="back_to_menu")],
     ])
 
 
 def reset_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Reset Session", callback_data="reset")],
+        [InlineKeyboardButton("📋 Menu", callback_data="back_to_menu")],
     ])
 
 
@@ -311,6 +313,7 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             session["front_generated"]  = True
             session["front_processing"] = False
+            access.deduct_point(user_id, 0.5)
 
             sent = await send_document_with_retry(
                 update.message.reply_document, front_path
@@ -396,7 +399,7 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             session["back_generated"]  = True
             session["back_processing"] = False
-            access.deduct_point(user_id)
+            access.deduct_point(user_id, 0.5)
 
             sent = await send_document_with_retry(
                 update.message.reply_document, back_path
@@ -421,7 +424,8 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif pts == 0:
                 pts_line = "⚠️ You have <b>0 points</b> left. Use the button below to request more."
             else:
-                pts_line = f"🎯 You have <b>{pts}</b> point(s) remaining."
+                pts_fmt = int(pts) if pts == int(pts) else pts
+                pts_line = f"🎯 You have <b>{pts_fmt}</b> point(s) remaining."
 
             await safe_reply(
                 update.message.reply_text,
@@ -1396,6 +1400,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             processed_files[cache_key] = time.time()
             session["front_generated"]  = True
             session["front_processing"] = False
+            access.deduct_point(user_id, 0.5)
 
             sent = await send_document_with_retry(
                 update.message.reply_document, front_path
@@ -1523,7 +1528,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             session["back_generated"]  = True
             session["back_processing"] = False
-            access.deduct_point(user_id)
+            access.deduct_point(user_id, 0.5)
 
             sent = await send_document_with_retry(
                 update.message.reply_document, back_path
@@ -1549,7 +1554,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif pts == 0:
                 pts_line = "⚠️ You have <b>0 points</b> left. Use the button below to request more."
             else:
-                pts_line = f"🎯 You have <b>{pts}</b> point(s) remaining."
+                pts_fmt = int(pts) if pts == int(pts) else pts
+                pts_line = f"🎯 You have <b>{pts_fmt}</b> point(s) remaining."
 
             await safe_reply(
                 update.message.reply_text,
