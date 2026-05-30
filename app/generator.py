@@ -20,7 +20,7 @@ from PIL import (
 # GPU SESSION (ONNXRUNTIME GPU)
 # =========================================================
 session = new_session(
-    "isnet-general-use",
+    "u2net_human_seg",
     providers=["CPUExecutionProvider"]
 )
 
@@ -30,7 +30,7 @@ session = new_session(
 # =========================================================
 try:
 
-    print("🔥 Warming up ISNet model...")
+    print("🔥 Warming up U2NET model...")
 
     warmup_img = Image.new("RGB", (512, 512), "white")
 
@@ -322,37 +322,14 @@ def extract_face(image_path):
 def remove_background(image):
 
     # =====================================================
-    # CLAHE PREPROCESSING
-    #
-    # Low-light / warm-coloured clothing (e.g. dark yellow)
-    # has low contrast against common backgrounds, causing
-    # the segmentation model to mis-label those pixels as
-    # background and cut them out.
-    #
-    # Fix: enhance contrast in LAB space (L channel only)
-    # before passing to the model.  The enhanced image is
-    # used ONLY for segmentation — the mask is then applied
-    # to the ORIGINAL image so colours are never affected.
-    # =====================================================
-    orig_np = np.array(image)[:, :, :3]          # original RGB, always correct
-
-    lab     = cv2.cvtColor(orig_np, cv2.COLOR_RGB2LAB)
-    l, a, b = cv2.split(lab)
-    clahe   = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    lab_enhanced = cv2.merge([clahe.apply(l), a, b])
-    enhanced_np  = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2RGB)
-    enhanced_pil = Image.fromarray(enhanced_np)
-
-    # =====================================================
-    # REMOVE BG — model sees high-contrast version
+    # REMOVE BG
     # =====================================================
     output = remove(
-        enhanced_pil,
+        image,
         session=session
     )
 
-    output   = output.convert("RGBA")
-    alpha_np = np.array(output)[:, :, 3]         # mask only — colours discarded
+    output = output.convert("RGBA")
 
     # =====================================================
     # ALPHA CLEANUP  (OpenCV morphological pipeline)
@@ -366,6 +343,9 @@ def remove_background(image):
     #   2  Erode inward         — pull edge inside the person
     #   3  Gaussian blur        — feather edge back outward
     # =====================================================
+
+    img_np   = np.array(output)
+    alpha_np = img_np[:, :, 3]
 
     # ── 1: binarise ──────────────────────────────────────
     _, alpha_bin = cv2.threshold(alpha_np, 20, 255, cv2.THRESH_BINARY)
@@ -383,8 +363,10 @@ def remove_background(image):
         borderType=cv2.BORDER_REPLICATE
     )
 
-    # Combine ORIGINAL colours with the improved mask
-    result_np = np.dstack([orig_np, alpha_feathered.astype(np.uint8)])
+    result_np = np.dstack([
+        img_np[:, :, :3],
+        alpha_feathered.astype(np.uint8)
+    ])
     return Image.fromarray(result_np, "RGBA")
 
 # =========================================================
