@@ -777,11 +777,11 @@ def generate_id(data, image_path, output_path, debug_dir="temp", template_id="a"
 
     avg = stat.mean[0]
 
-    target = 147
+    target = 165
 
     factor = target / max(avg, 1)
 
-    factor = max(0.7, min(1.4, factor))
+    factor = max(0.7, min(1.6, factor))
 
     gray = ImageEnhance.Brightness(gray).enhance(factor)
 
