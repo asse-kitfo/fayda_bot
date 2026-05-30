@@ -70,10 +70,16 @@ def calculate_issue_date(date_str):
                 return date_str
 
             year, mon, day = parts
-            year = str(int(year) - 8)
-            day = str(int(day) + 2).zfill(2)
-
-            return f"{year}/{mon}/{day}"
+            MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun",
+                           "Jul","Aug","Sep","Oct","Nov","Dec"]
+            mon_cap = mon.capitalize()
+            if mon_cap not in MONTH_NAMES:
+                return date_str
+            month_num = MONTH_NAMES.index(mon_cap) + 1
+            dt = datetime(int(year), month_num, int(day))
+            dt = dt.replace(year=dt.year - 8) + timedelta(days=2)
+            abbrev = MONTH_NAMES[dt.month - 1]
+            return f"{dt.year}/{abbrev}/{dt.day:02d}"
 
         elif re.match(r"^\d{2}/\d{2}/\d{4}$", date_str):
             # Format: DD/MM/YYYY  (Ethiopian calendar)
