@@ -189,6 +189,7 @@ def generate_back(data, qr_crop, output_path, name="unknown", template_id="a"):
     template = Image.open(
         path("assets", "templates", tpl_file)
     )
+    template_dpi = template.info.get("dpi", (300, 300))
 
     draw = ImageDraw.Draw(template)
 
@@ -315,7 +316,8 @@ def generate_back(data, qr_crop, output_path, name="unknown", template_id="a"):
     template.save(
         final_path,
         format="TIFF",
-        compression="raw"
+        compression="raw",
+        dpi=template_dpi
     )
 
     print("✅ Back generated:", final_path)

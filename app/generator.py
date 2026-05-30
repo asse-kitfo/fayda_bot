@@ -375,14 +375,17 @@ def remove_background(image):
     #
     #   1  Erode inward   — pull edge inside the person
     #   2  Gaussian blur  — feather edge back outward
+    #
+    # Smaller kernel (5×5 instead of 11×11) preserves fine
+    # edge detail (hair, ears) for a higher-quality cutout.
     # =====================================================
-    k_erode      = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    k_erode      = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     alpha_eroded = cv2.erode(
         refined, k_erode,
         borderType=cv2.BORDER_REPLICATE
     )
     alpha_feathered = cv2.GaussianBlur(
-        alpha_eroded, (7, 7), 2,
+        alpha_eroded, (5, 5), 1,
         borderType=cv2.BORDER_REPLICATE
     )
 
@@ -662,6 +665,7 @@ def generate_id(data, image_path, output_path, debug_dir="temp", template_id="a"
     coords_file = "coords.json"
 
     template = Image.open(path("assets", "templates", tpl_file))
+    template_dpi = template.info.get("dpi", (300, 300))
     draw = ImageDraw.Draw(template)
 
     with open(path("config", coords_file), "r", encoding="utf-8") as f:
@@ -847,6 +851,19 @@ def generate_id(data, image_path, output_path, debug_dir="temp", template_id="a"
     )
 
     # =====================================================
+    # SHARPEN + CONTRAST BOOST (post-resize quality)
+    #
+    # UnsharpMask recovers detail softened by LANCZOS
+    # resizing. A mild contrast lift makes the face crisp.
+    # =====================================================
+    r, g, b_ch, a_ch = face.split()
+    rgb = Image.merge("RGB", (r, g, b_ch))
+    rgb = rgb.filter(ImageFilter.UnsharpMask(radius=1.2, percent=140, threshold=2))
+    rgb = ImageEnhance.Contrast(rgb).enhance(1.12)
+    r, g, b_ch = rgb.split()
+    face = Image.merge("RGBA", (r, g, b_ch, a_ch))
+
+    # =====================================================
     # CENTER INSIDE FACE BOX
     # =====================================================
 
@@ -909,7 +926,8 @@ def generate_id(data, image_path, output_path, debug_dir="temp", template_id="a"
     template.save(
         final_path,
         format="TIFF",
-        compression="raw"
+        compression="raw",
+        dpi=template_dpi
     )
 
     print("✅ ID Generated:", final_path)
