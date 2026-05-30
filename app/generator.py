@@ -294,7 +294,7 @@ def extract_face(image_path):
     # This scales with face size so it captures neck + chest without ever
     # reaching the white gap or QR code that appear below the face photo
     # on the ID card screenshot.
-    pad_bottom = int(fh * 0.55)
+    pad_bottom = int(fh * 0.75)
 
     # Always translate coordinates back to the FULL image before clamping.
     full_fx = fx + offset_x
@@ -304,7 +304,7 @@ def extract_face(image_path):
     sy1 = max(0, full_fy - pad_top)
     sx2 = min(img.shape[1], full_fx + fw + pad_right)
     # Hard cap at 46 % of image height — keeps crop above white gap and QR code
-    qr_safe_limit = int(img.shape[0] * 0.46)
+    qr_safe_limit = int(img.shape[0] * 0.50)
     sy2 = min(qr_safe_limit, full_fy + fh + pad_bottom)
 
     final_face = img[sy1:sy2, sx1:sx2]
