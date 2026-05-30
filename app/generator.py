@@ -304,7 +304,7 @@ def extract_face(image_path):
     sy1 = max(0, full_fy - pad_top)
     sx2 = min(img.shape[1], full_fx + fw + pad_right)
     # Hard cap at 46 % of image height — keeps crop above white gap and QR code
-    qr_safe_limit = int(img.shape[0] * 0.48)
+    qr_safe_limit = int(img.shape[0] * 0.46)
     sy2 = min(qr_safe_limit, full_fy + fh + pad_bottom)
 
     final_face = img[sy1:sy2, sx1:sx2]
