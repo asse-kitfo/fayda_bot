@@ -259,7 +259,7 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tg_file = await context.bot.get_file(dl_file_id)
         retry_job_id    = str(uuid.uuid4())
         retry_file_path = f"{user_temp}/{retry_job_id}.jpg"
-        await tg_file.download_to_drive(retry_file_path)
+        await download_with_retry(tg_file, retry_file_path)
     except Exception as e:
         print("❌ Retry download failed:", e)
         await update.message.reply_text(
@@ -282,14 +282,15 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             front_data   = session["front_data"]
             front_output = f"temp/{user_id}/front_{session['job_id']}.tif"
 
-            front_path = await asyncio.to_thread(
-                generate_id,
-                front_data,
-                retry_file_path,
-                front_output,
-                user_temp,
-                session.get("template_id", "a")
-            )
+            async with _heavy_sem:
+                front_path = await asyncio.to_thread(
+                    generate_id,
+                    front_data,
+                    retry_file_path,
+                    front_output,
+                    user_temp,
+                    session.get("template_id", "a")
+                )
 
             try:
                 os.remove(retry_file_path)
@@ -311,16 +312,20 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             session["front_generated"]  = True
             session["front_processing"] = False
 
+            sent = await send_document_with_retry(
+                update.message.reply_document, front_path
+            )
             try:
-                with open(front_path, "rb") as f:
-                    await update.message.reply_document(document=f)
-            except Exception as e:
-                print("⚠️ Failed sending front:", e)
-            finally:
-                try:
-                    os.remove(front_path)
-                except OSError:
-                    pass
+                os.remove(front_path)
+            except OSError:
+                pass
+            if not sent:
+                await safe_reply(
+                    update.message.reply_text,
+                    "⚠️ Front ID was generated but couldn't be sent.\n\nUse /retry to try again.",
+                    reply_markup=reset_keyboard()
+                )
+                return
 
             session["step"] = "waiting_back"
             await safe_reply(
@@ -338,12 +343,13 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text("🔍 Retrying back side processing...")
 
-            back_data, qr_crop = await asyncio.to_thread(
-                process_back_ocr,
-                retry_file_path,
-                True,
-                user_temp
-            )
+            async with _heavy_sem:
+                back_data, qr_crop = await asyncio.to_thread(
+                    process_back_ocr,
+                    retry_file_path,
+                    True,
+                    user_temp
+                )
 
             try:
                 os.remove(retry_file_path)
@@ -378,29 +384,34 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             person_name = front_data.get("name_en", "unknown")
             back_output = f"temp/{user_id}/back_{session['job_id']}.tif"
 
-            back_path = await asyncio.to_thread(
-                generate_back,
-                back_data,
-                qr_crop,
-                back_output,
-                person_name,
-                session.get("template_id", "a")
-            )
+            async with _heavy_sem:
+                back_path = await asyncio.to_thread(
+                    generate_back,
+                    back_data,
+                    qr_crop,
+                    back_output,
+                    person_name,
+                    session.get("template_id", "a")
+                )
 
             session["back_generated"]  = True
             session["back_processing"] = False
             access.deduct_point(user_id)
 
+            sent = await send_document_with_retry(
+                update.message.reply_document, back_path
+            )
             try:
-                with open(back_path, "rb") as f:
-                    await update.message.reply_document(document=f)
-            except Exception as e:
-                print("⚠️ Failed sending back:", e)
-            finally:
-                try:
-                    os.remove(back_path)
-                except OSError:
-                    pass
+                os.remove(back_path)
+            except OSError:
+                pass
+            if not sent:
+                await safe_reply(
+                    update.message.reply_text,
+                    "⚠️ Back ID was generated but couldn't be sent.\n\nUse /retry to try again.",
+                    reply_markup=reset_keyboard()
+                )
+                return
 
             user_sessions.pop(user_id, None)
 
@@ -1107,6 +1118,10 @@ processing_users = set()
 processed_files  = {}
 SESSION_TIMEOUT  = 1200
 
+# Limit concurrent heavy CPU jobs (OCR + image generation)
+# so the event loop stays responsive under multi-user load.
+_heavy_sem = asyncio.Semaphore(3)
+
 
 # =========================================================
 # SAFE REPLY
@@ -1117,6 +1132,47 @@ async def safe_reply(method, *args, **kwargs):
     except Exception as e:
         print("⚠️ Reply failed:", e)
         return None
+
+
+# =========================================================
+# DOWNLOAD WITH RETRY
+# Retries the Telegram file download up to 3 times with
+# exponential backoff so a transient network blip doesn't
+# fail the whole step.
+# =========================================================
+async def download_with_retry(tg_file, dest_path, attempts=3):
+    for i in range(attempts):
+        try:
+            await tg_file.download_to_drive(dest_path)
+            return
+        except (TimedOut, NetworkError) as e:
+            print(f"⚠️ Download attempt {i+1} failed: {e}")
+            if i < attempts - 1:
+                await asyncio.sleep(2 ** i)
+    raise RuntimeError("Download failed after retries")
+
+
+# =========================================================
+# SEND DOCUMENT WITH RETRY
+# Retries sending the output TIFF up to 3 times. The file
+# is only deleted after a confirmed successful send, or
+# after all retries are exhausted (caller handles fallback).
+# Returns True on success, False on failure.
+# =========================================================
+async def send_document_with_retry(reply_fn, file_path, attempts=3):
+    for i in range(attempts):
+        try:
+            with open(file_path, "rb") as f:
+                await reply_fn(document=f)
+            return True
+        except (TimedOut, NetworkError) as e:
+            print(f"⚠️ Send attempt {i+1} failed: {e}")
+            if i < attempts - 1:
+                await asyncio.sleep(2 ** i)
+        except Exception as e:
+            print(f"⚠️ Send failed: {e}")
+            break
+    return False
 
 
 # =========================================================
@@ -1184,7 +1240,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         job_id    = str(uuid.uuid4())
         file_path = f"{user_temp}/{job_id}.jpg"
-        await file.download_to_drive(file_path)
+        await download_with_retry(file, file_path)
 
         # =====================================================
         # STEP 1 → FRONT OCR
@@ -1201,12 +1257,13 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text("🔍 Processing front ID...")
 
-            front_data = await asyncio.to_thread(
-                process_ocr,
-                file_path,
-                False,
-                user_temp
-            )
+            async with _heavy_sem:
+                front_data = await asyncio.to_thread(
+                    process_ocr,
+                    file_path,
+                    False,
+                    user_temp
+                )
 
             if front_data.get("problems"):
 
@@ -1310,14 +1367,15 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             front_data   = session["front_data"]
             front_output = f"temp/{user_id}/front_{session['job_id']}.tif"
 
-            front_path = await asyncio.to_thread(
-                generate_id,
-                front_data,
-                file_path,
-                front_output,
-                user_temp,
-                session.get("template_id", "a")
-            )
+            async with _heavy_sem:
+                front_path = await asyncio.to_thread(
+                    generate_id,
+                    front_data,
+                    file_path,
+                    front_output,
+                    user_temp,
+                    session.get("template_id", "a")
+                )
 
             try:
                 os.remove(file_path)
@@ -1339,16 +1397,21 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             session["front_generated"]  = True
             session["front_processing"] = False
 
+            sent = await send_document_with_retry(
+                update.message.reply_document, front_path
+            )
             try:
-                with open(front_path, "rb") as f:
-                    await update.message.reply_document(document=f)
-            except Exception as e:
-                print("⚠️ Failed sending front:", e)
-            finally:
-                try:
-                    os.remove(front_path)
-                except OSError:
-                    pass
+                os.remove(front_path)
+            except OSError:
+                pass
+            if not sent:
+                await safe_reply(
+                    update.message.reply_text,
+                    "⚠️ Front ID was generated but couldn't be sent due to a network error.\n\n"
+                    "Use /retry to resend it.",
+                    reply_markup=reset_keyboard()
+                )
+                return
 
             session["step"] = "waiting_back"
 
@@ -1400,12 +1463,13 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await safe_reply(update.message.reply_text, "🔍 Processing back side...")
 
-            back_data, qr_crop = await asyncio.to_thread(
-                process_back_ocr,
-                file_path,
-                True,
-                user_temp
-            )
+            async with _heavy_sem:
+                back_data, qr_crop = await asyncio.to_thread(
+                    process_back_ocr,
+                    file_path,
+                    True,
+                    user_temp
+                )
 
             if (
                 not back_data
@@ -1447,29 +1511,35 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             person_name = front_data.get("name_en", "unknown")
             back_output = f"temp/{user_id}/back_{session['job_id']}.tif"
 
-            back_path = await asyncio.to_thread(
-                generate_back,
-                back_data,
-                qr_crop,
-                back_output,
-                person_name,
-                session.get("template_id", "a")
-            )
+            async with _heavy_sem:
+                back_path = await asyncio.to_thread(
+                    generate_back,
+                    back_data,
+                    qr_crop,
+                    back_output,
+                    person_name,
+                    session.get("template_id", "a")
+                )
 
             session["back_generated"]  = True
             session["back_processing"] = False
             access.deduct_point(user_id)
 
+            sent = await send_document_with_retry(
+                update.message.reply_document, back_path
+            )
             try:
-                with open(back_path, "rb") as f:
-                    await update.message.reply_document(document=f)
-            except Exception as e:
-                print("⚠️ Failed sending back:", e)
-            finally:
-                try:
-                    os.remove(back_path)
-                except OSError:
-                    pass
+                os.remove(back_path)
+            except OSError:
+                pass
+            if not sent:
+                await safe_reply(
+                    update.message.reply_text,
+                    "⚠️ Back ID was generated but couldn't be sent due to a network error.\n\n"
+                    "Use /retry to resend it.",
+                    reply_markup=reset_keyboard()
+                )
+                return
 
             user_sessions.pop(user_id, None)
 
@@ -1507,17 +1577,23 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # =========================================================
     except TimedOut:
         print("❌ Timeout")
-        await safe_reply(update.message.reply_text, "⚠️ Network timeout.")
+        await safe_reply(
+            update.message.reply_text,
+            "⚠️ Network timeout. Use /retry to try the last step again without re-uploading."
+        )
 
     except NetworkError:
         print("❌ Network Error")
-        await safe_reply(update.message.reply_text, "⚠️ Network error.")
+        await safe_reply(
+            update.message.reply_text,
+            "⚠️ Network error. Use /retry to try the last step again without re-uploading."
+        )
 
     except Exception as e:
         print("❌ ERROR:", e)
         await safe_reply(
             update.message.reply_text,
-            "⚠️ Something went wrong. Tap below to reset and try again.",
+            "⚠️ Something went wrong. Use /retry to try again, or tap below to reset.",
             reply_markup=reset_keyboard()
         )
 
@@ -1587,6 +1663,14 @@ def main():
         if expired:
             print(f"🧹 Swept {len(expired)} expired session(s)")
 
+    async def _sweep_processed_files(context):
+        now = time.time()
+        stale = [k for k, ts in list(processed_files.items()) if now - ts > 120]
+        for k in stale:
+            processed_files.pop(k, None)
+        if stale:
+            print(f"🧹 Swept {len(stale)} stale processed_files entries")
+
     app.job_queue.run_repeating(
         _cleanup_job,
         interval=600,
@@ -1597,6 +1681,12 @@ def main():
         _sweep_sessions,
         interval=SESSION_TIMEOUT,
         first=SESSION_TIMEOUT
+    )
+
+    app.job_queue.run_repeating(
+        _sweep_processed_files,
+        interval=120,
+        first=120
     )
 
     print("🚀 Initializing OCR and segmentation models...")
