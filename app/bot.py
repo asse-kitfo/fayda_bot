@@ -346,6 +346,17 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif last_attempted == "back":
 
+            pts_now = access.get_points(user_id)
+            if pts_now is not None and pts_now < 0.5:
+                await safe_reply(
+                    update.message.reply_text,
+                    "⚠️ You don't have enough points to generate the Back ID.\n\n"
+                    "You need at least <b>0.5 points</b>. Use the button below to request more.",
+                    parse_mode="HTML",
+                    reply_markup=no_access_keyboard()
+                )
+                return
+
             session["back_processing"] = True
             session["step"]            = "generating_back"
 
@@ -1467,6 +1478,17 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await safe_reply(
                     update.message.reply_text,
                     "⏳ Back side processing already running..."
+                )
+                return
+
+            pts_now = access.get_points(user_id)
+            if pts_now is not None and pts_now < 0.5:
+                await safe_reply(
+                    update.message.reply_text,
+                    "⚠️ You don't have enough points to generate the Back ID.\n\n"
+                    "You need at least <b>0.5 points</b>. Use the button below to request more.",
+                    parse_mode="HTML",
+                    reply_markup=no_access_keyboard()
                 )
                 return
 

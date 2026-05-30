@@ -28,4 +28,4 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "watchmedo auto-restart --patterns=\"*.py\" --recursive --signal SIGTERM -- python main.py"
+args = "python main.py"
