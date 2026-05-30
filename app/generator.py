@@ -322,14 +322,37 @@ def extract_face(image_path):
 def remove_background(image):
 
     # =====================================================
-    # REMOVE BG USING GPU SESSION
+    # CLAHE PREPROCESSING
+    #
+    # Low-light / warm-coloured clothing (e.g. dark yellow)
+    # has low contrast against common backgrounds, causing
+    # the segmentation model to mis-label those pixels as
+    # background and cut them out.
+    #
+    # Fix: enhance contrast in LAB space (L channel only)
+    # before passing to the model.  The enhanced image is
+    # used ONLY for segmentation — the mask is then applied
+    # to the ORIGINAL image so colours are never affected.
+    # =====================================================
+    orig_np = np.array(image)[:, :, :3]          # original RGB, always correct
+
+    lab     = cv2.cvtColor(orig_np, cv2.COLOR_RGB2LAB)
+    l, a, b = cv2.split(lab)
+    clahe   = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    lab_enhanced = cv2.merge([clahe.apply(l), a, b])
+    enhanced_np  = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2RGB)
+    enhanced_pil = Image.fromarray(enhanced_np)
+
+    # =====================================================
+    # REMOVE BG — model sees high-contrast version
     # =====================================================
     output = remove(
-        image,
+        enhanced_pil,
         session=session
     )
 
-    output = output.convert("RGBA")
+    output   = output.convert("RGBA")
+    alpha_np = np.array(output)[:, :, 3]         # mask only — colours discarded
 
     # =====================================================
     # ALPHA CLEANUP  (OpenCV morphological pipeline)
@@ -342,11 +365,7 @@ def remove_background(image):
     #   1  Binarise mask at 20  — hard-cut background bleed
     #   2  Erode inward         — pull edge inside the person
     #   3  Gaussian blur        — feather edge back outward
-    #                             (samples only foreground px)
     # =====================================================
-
-    img_np   = np.array(output)          # H×W×4  RGBA from rembg
-    alpha_np = img_np[:, :, 3]
 
     # ── 1: binarise ──────────────────────────────────────
     _, alpha_bin = cv2.threshold(alpha_np, 20, 255, cv2.THRESH_BINARY)
@@ -364,10 +383,8 @@ def remove_background(image):
         borderType=cv2.BORDER_REPLICATE
     )
 
-    result_np = np.dstack([
-        img_np[:, :, :3],
-        alpha_feathered.astype(np.uint8)
-    ])
+    # Combine ORIGINAL colours with the improved mask
+    result_np = np.dstack([orig_np, alpha_feathered.astype(np.uint8)])
     return Image.fromarray(result_np, "RGBA")
 
 # =========================================================
