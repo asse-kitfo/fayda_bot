@@ -45,17 +45,16 @@ WELCOME_TEXT = (
 HELP_TEXT = (
     "📋 <b>How to use this bot:</b>\n\n"
     "<b>Step 1 —</b> Send a screenshot of the <b>FRONT</b> of the Fayda Digital ID card.\n"
-    "The bot will extract your name, date of birth, gender, and ID number.\n\n"
+    "The bot will read the name, date of birth, gender, and ID number.\n\n"
     "<b>Step 2 —</b> Send a clear <b>FACE PHOTO</b> of the person.\n"
-    "The background will be removed automatically.\n\n"
+    "The background will be removed and the <b>Front ID card</b> will be generated.\n\n"
     "<b>Step 3 —</b> Send a screenshot of the <b>BACK</b> of the ID card.\n"
-    "The bot will extract the address, phone number, and QR code.\n\n"
-    "✅ The bot will then generate high-quality front and back ID images.\n\n"
+    "The bot will read the address, FIN, and QR code, then generate the <b>Back ID card</b>.\n\n"
     "📸 <b>Tips for best results:</b>\n"
-    "• Make sure the full ID is visible\n"
+    "• Make sure the full ID is visible in the screenshot\n"
     "• Text should be clear and not blurry\n"
     "• No dark overlay or cropping\n"
-    "• Use a well-lit face photo"
+    "• Use a well-lit, front-facing face photo"
 )
 
 # =========================================================
@@ -341,7 +340,7 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             front_msg = "✅ Front ID generated.\n\n📸 Now send the <b>BACK</b> screenshot of the ID card."
             if pts_after is not None and 0 < pts_after <= 1:
                 pts_fmt = int(pts_after) if pts_after == int(pts_after) else pts_after
-                front_msg += f"\n\n⚠️ <b>Low points warning:</b> You only have <b>{pts_fmt}</b> point(s) left. Request more soon to avoid being blocked."
+                front_msg += f"\n\n⚠️ <b>Low points:</b> You only have <b>{pts_fmt}</b> point(s) left. Request more soon to continue without interruption."
 
             await safe_reply(
                 update.message.reply_text,
@@ -356,8 +355,8 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if pts_now is not None and pts_now < 0.5:
                 await safe_reply(
                     update.message.reply_text,
-                    "⚠️ You don't have enough points to generate the Back ID.\n\n"
-                    "You need at least <b>0.5 points</b>. Use the button below to request more.",
+                    "⚠️ You're out of points and cannot generate the Back ID.\n\n"
+                    "Use the button below to request more.",
                     parse_mode="HTML",
                     reply_markup=no_access_keyboard()
                 )
@@ -386,7 +385,7 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 session["back_processing"] = False
                 session["step"]            = "waiting_back"
 
-                msg = "❌ BACK validation failed.\n\n"
+                msg = "❌ Could not read the Back ID card.\n\n"
                 problems = back_data.get("problems", []) if back_data else []
                 for p in problems:
                     msg += f"• {p}\n"
@@ -1299,7 +1298,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 problems = front_data["problems"]
                 issues   = front_data.get("issues", [])
 
-                msg = "❌ OCR validation failed.\n\n"
+                msg = "❌ Could not read the Front ID card.\n\n"
                 for p in problems:
                     msg += f"• {p}\n"
 
@@ -1454,7 +1453,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             front_msg = "✅ Front ID generated.\n\n📸 Now send the <b>BACK</b> screenshot of the ID card."
             if pts_after is not None and 0 < pts_after <= 1:
                 pts_fmt = int(pts_after) if pts_after == int(pts_after) else pts_after
-                front_msg += f"\n\n⚠️ <b>Low points warning:</b> You only have <b>{pts_fmt}</b> point(s) left. Request more soon to avoid being blocked."
+                front_msg += f"\n\n⚠️ <b>Low points:</b> You only have <b>{pts_fmt}</b> point(s) left. Request more soon to continue without interruption."
 
             await safe_reply(
                 update.message.reply_text,
@@ -1499,8 +1498,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if pts_now is not None and pts_now < 0.5:
                 await safe_reply(
                     update.message.reply_text,
-                    "⚠️ You don't have enough points to generate the Back ID.\n\n"
-                    "You need at least <b>0.5 points</b>. Use the button below to request more.",
+                    "⚠️ You're out of points and cannot generate the Back ID.\n\n"
+                    "Use the button below to request more.",
                     parse_mode="HTML",
                     reply_markup=no_access_keyboard()
                 )
@@ -1530,7 +1529,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 session["back_processing"] = False
                 session["step"] = "waiting_back"
 
-                msg = "❌ BACK validation failed.\n\n"
+                msg = "❌ Could not read the Back ID card.\n\n"
                 problems = back_data.get("problems", []) if back_data else []
                 for p in problems:
                     msg += f"• {p}\n"
