@@ -336,10 +336,16 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             session["step"] = "waiting_back"
+
+            pts_after = access.get_points(user_id)
+            front_msg = "✅ Front ID generated.\n\n📸 Now send the <b>BACK</b> screenshot of the ID card."
+            if pts_after is not None and 0 < pts_after <= 1:
+                pts_fmt = int(pts_after) if pts_after == int(pts_after) else pts_after
+                front_msg += f"\n\n⚠️ <b>Low points warning:</b> You only have <b>{pts_fmt}</b> point(s) left. Request more soon to avoid being blocked."
+
             await safe_reply(
                 update.message.reply_text,
-                "✅ Front ID generated.\n\n"
-                "📸 Now send the <b>BACK</b> screenshot of the ID card.",
+                front_msg,
                 parse_mode="HTML",
                 reply_markup=reset_keyboard()
             )
@@ -439,6 +445,9 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pts_line = "♾ Unlimited access remaining."
             elif pts == 0:
                 pts_line = "⚠️ You have <b>0 points</b> left. Use the button below to request more."
+            elif pts <= 1:
+                pts_fmt = int(pts) if pts == int(pts) else pts
+                pts_line = f"⚠️ <b>Low points:</b> Only <b>{pts_fmt}</b> point(s) left — enough for one more generation. Request more soon."
             else:
                 pts_fmt = int(pts) if pts == int(pts) else pts
                 pts_line = f"🎯 You have <b>{pts_fmt}</b> point(s) remaining."
@@ -1441,10 +1450,15 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             session["step"] = "waiting_back"
 
+            pts_after = access.get_points(user_id)
+            front_msg = "✅ Front ID generated.\n\n📸 Now send the <b>BACK</b> screenshot of the ID card."
+            if pts_after is not None and 0 < pts_after <= 1:
+                pts_fmt = int(pts_after) if pts_after == int(pts_after) else pts_after
+                front_msg += f"\n\n⚠️ <b>Low points warning:</b> You only have <b>{pts_fmt}</b> point(s) left. Request more soon to avoid being blocked."
+
             await safe_reply(
                 update.message.reply_text,
-                "✅ Front ID generated.\n\n"
-                "📸 Now send the <b>BACK</b> screenshot of the ID card.",
+                front_msg,
                 parse_mode="HTML",
                 reply_markup=reset_keyboard()
             )
@@ -1585,6 +1599,9 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pts_line = "♾ Unlimited access remaining."
             elif pts == 0:
                 pts_line = "⚠️ You have <b>0 points</b> left. Use the button below to request more."
+            elif pts <= 1:
+                pts_fmt = int(pts) if pts == int(pts) else pts
+                pts_line = f"⚠️ <b>Low points:</b> Only <b>{pts_fmt}</b> point(s) left — enough for one more generation. Request more soon."
             else:
                 pts_fmt = int(pts) if pts == int(pts) else pts
                 pts_line = f"🎯 You have <b>{pts_fmt}</b> point(s) remaining."
