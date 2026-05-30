@@ -781,7 +781,7 @@ def generate_id(data, image_path, output_path, debug_dir="temp", template_id="a"
 
     avg = stat.mean[0]
 
-    target = 185
+    target = 165
 
     factor = target / max(avg, 1)
 
