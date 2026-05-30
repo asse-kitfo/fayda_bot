@@ -20,7 +20,7 @@ from PIL import (
 # GPU SESSION (ONNXRUNTIME GPU)
 # =========================================================
 session = new_session(
-    "u2net_human_seg",
+    "isnet-general-use",
     providers=["CPUExecutionProvider"]
 )
 
@@ -30,7 +30,7 @@ session = new_session(
 # =========================================================
 try:
 
-    print("🔥 Warming up U2NET model...")
+    print("🔥 Warming up ISNet model...")
 
     warmup_img = Image.new("RGB", (512, 512), "white")
 
