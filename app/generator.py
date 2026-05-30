@@ -858,7 +858,7 @@ def generate_id(data, image_path, output_path, debug_dir="temp", template_id="a"
     # =====================================================
     r, g, b_ch, a_ch = face.split()
     rgb = Image.merge("RGB", (r, g, b_ch))
-    rgb = rgb.filter(ImageFilter.UnsharpMask(radius=0.8, percent=80, threshold=3))
+    rgb = rgb.filter(ImageFilter.UnsharpMask(radius=1.0, percent=110, threshold=2))
     rgb = ImageEnhance.Contrast(rgb).enhance(1.12)
     r, g, b_ch = rgb.split()
     face = Image.merge("RGBA", (r, g, b_ch, a_ch))
