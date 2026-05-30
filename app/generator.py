@@ -321,52 +321,72 @@ def extract_face(image_path):
 # =========================================================
 def remove_background(image):
 
-    # =====================================================
-    # REMOVE BG
-    # =====================================================
-    output = remove(
-        image,
-        session=session
-    )
-
-    output = output.convert("RGBA")
+    # Original RGB — correct colours everywhere (used for GrabCut and output)
+    orig_np = np.array(image)[:, :, :3]
 
     # =====================================================
-    # ALPHA CLEANUP  (OpenCV morphological pipeline)
+    # STEP 1 — u2net initial mask
+    # =====================================================
+    output   = remove(image, session=session).convert("RGBA")
+    alpha_np = np.array(output)[:, :, 3]
+
+    # =====================================================
+    # STEP 2 — GrabCut refinement
     #
-    # Fixes white/coloured border around the head that
-    # appears when background-contaminated semi-transparent
-    # pixels survive into the composite.
+    # u2net mis-labels warm-coloured clothing (e.g. yellow
+    # hijab) against white backgrounds as background.
+    # GrabCut builds an explicit GMM colour model of
+    # foreground vs background using the u2net mask as a
+    # hint, then re-segments by colour — correctly pulling
+    # those missed clothing pixels back into the foreground.
     #
-    # Pipeline:
-    #   1  Binarise mask at 20  — hard-cut background bleed
-    #   2  Erode inward         — pull edge inside the person
-    #   3  Gaussian blur        — feather edge back outward
+    # GrabCut label map seeded from u2net alpha:
+    #   alpha > 200  → GC_FGD     (definite foreground)
+    #   alpha >  20  → GC_PR_FGD  (probable foreground)
+    #   alpha <=  5  → GC_BGD     (definite background)
+    #   otherwise    → GC_PR_BGD  (probable background)
     # =====================================================
+    img_bgr = cv2.cvtColor(orig_np, cv2.COLOR_RGB2BGR)
 
-    img_np   = np.array(output)
-    alpha_np = img_np[:, :, 3]
+    gc_mask = np.full(alpha_np.shape, cv2.GC_PR_BGD, dtype=np.uint8)
+    gc_mask[alpha_np <= 5]   = cv2.GC_BGD
+    gc_mask[alpha_np > 20]   = cv2.GC_PR_FGD
+    gc_mask[alpha_np > 200]  = cv2.GC_FGD
 
-    # ── 1: binarise ──────────────────────────────────────
-    _, alpha_bin = cv2.threshold(alpha_np, 20, 255, cv2.THRESH_BINARY)
+    bgd_model = np.zeros((1, 65), np.float64)
+    fgd_model = np.zeros((1, 65), np.float64)
 
-    # ── 2: erode inward ───────────────────────────────────
+    try:
+        cv2.grabCut(
+            img_bgr, gc_mask, None,
+            bgd_model, fgd_model,
+            5, cv2.GC_INIT_WITH_MASK
+        )
+        refined = np.where(
+            (gc_mask == cv2.GC_FGD) | (gc_mask == cv2.GC_PR_FGD),
+            np.uint8(255), np.uint8(0)
+        )
+    except Exception:
+        # Fall back to plain u2net binarised mask if GrabCut fails
+        _, refined = cv2.threshold(alpha_np, 20, 255, cv2.THRESH_BINARY)
+
+    # =====================================================
+    # STEP 3 — ALPHA CLEANUP  (border fix)
+    #
+    #   1  Erode inward   — pull edge inside the person
+    #   2  Gaussian blur  — feather edge back outward
+    # =====================================================
     k_erode      = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     alpha_eroded = cv2.erode(
-        alpha_bin, k_erode,
+        refined, k_erode,
         borderType=cv2.BORDER_REPLICATE
     )
-
-    # ── 3: Gaussian blur feathers edge outward ~4 px ─────
     alpha_feathered = cv2.GaussianBlur(
         alpha_eroded, (7, 7), 2,
         borderType=cv2.BORDER_REPLICATE
     )
 
-    result_np = np.dstack([
-        img_np[:, :, :3],
-        alpha_feathered.astype(np.uint8)
-    ])
+    result_np = np.dstack([orig_np, alpha_feathered.astype(np.uint8)])
     return Image.fromarray(result_np, "RGBA")
 
 # =========================================================
