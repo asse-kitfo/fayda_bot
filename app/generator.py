@@ -773,7 +773,7 @@ def generate_id(data, image_path, output_path, debug_dir="temp", template_id="a"
 
     gray = Image.merge("RGB", (r, g, b)).convert("L")
 
-    stat = ImageStat.Stat(gray)
+    stat = ImageStat.Stat(gray, mask=a)
 
     avg = stat.mean[0]
 
