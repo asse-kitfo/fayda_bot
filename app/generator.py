@@ -294,7 +294,7 @@ def extract_face(image_path):
     # This scales with face size so it captures neck + chest without ever
     # reaching the white gap or QR code that appear below the face photo
     # on the ID card screenshot.
-    pad_bottom = int(fh * 0.47)
+    pad_bottom = int(fh * 0.55)
 
     # Always translate coordinates back to the FULL image before clamping.
     full_fx = fx + offset_x
