@@ -688,8 +688,8 @@ def generate_id(data, image_path, output_path, debug_dir="temp", template_id="a"
     issue_greg = calculate_issue_date(data.get("exp_greg",""))
     issue_eth  = calculate_issue_date(data.get("exp_eth",""))
 
-    draw_text_box(draw, data.get("name_en",""), ocr["name_en"], font_en, 34, 2)
-    draw_text_box(draw, data.get("name_am",""), ocr["name_am"], font_am, 36, 1)
+    draw_text_box(draw, data.get("name_en",""), ocr["name_en"], font_en, 33, 2)
+    draw_text_box(draw, data.get("name_am",""), ocr["name_am"], font_am, 35, 1)
     draw_text_box(draw, dob, ocr["dob_greg"], font_en, 30, 0)
     draw_text_box(draw, exp, ocr["exp_greg"], font_en, 30, 0)
 
