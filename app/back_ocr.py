@@ -830,6 +830,7 @@ _WOREDA_TABLE = [
     (["mohrna", "mohrena"],  "Mohrna Aklil",                 "ሞህርና አክሊል"),
     (["ezja"],               "Ezja",                         "ኧዣ"),
     (["kombolcha"],          "Kombolcha City Administration","ኮምቦልቻ ከተማ አስተዳደር"),
+    (["muda"],          "Muda Furi","ሙዳ ፉሪ"),
 ]
 
 
@@ -1122,9 +1123,9 @@ def parse_back(text):
             ["kirkos"],
         ),
         (
-            "Akaky Kaliti", "አቃቂ ቃሊቲ",
+            "Akaki Kaliti", "አቃቂ ቃሊቲ",
             ["አቃቂ"],
-            ["akaki", "akaky"],
+            ["akaky", "akaki"],
         ),
         (
             "Gulele", "ጉለሌ",
@@ -1145,6 +1146,11 @@ def parse_back(text):
             "Lemi Kura", "ለሚ ኩራ",
             ["ለሚ"],
             ["lemi"],
+        ),
+        (
+            "Shager City Administration - Furi Sub-city", "ሸገር ከተማ አስተዳደር - ፉሪ ክፍለ ከተማ",
+            ["ፉሪ"],
+            ["furi"],
         ),
     ]
 
