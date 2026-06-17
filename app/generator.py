@@ -690,8 +690,8 @@ def generate_id(data, image_path, output_path, debug_dir="temp", template_id="a"
 
     draw_text_box(draw, data.get("name_en",""), ocr["name_en"], font_en, 34, 2)
     draw_text_box(draw, data.get("name_am",""), ocr["name_am"], font_am, 36, 1)
-    draw_text_box(draw, dob, ocr["dob_greg"], font_en, 32, 0)
-    draw_text_box(draw, exp, ocr["exp_greg"], font_en, 32, 0)
+    draw_text_box(draw, dob, ocr["dob_greg"], font_en, 30, 0)
+    draw_text_box(draw, exp, ocr["exp_greg"], font_en, 30, 0)
 
     draw_mixed_text(
         draw,
