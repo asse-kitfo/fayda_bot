@@ -1077,12 +1077,21 @@ def fix_amharic_from_english(name_en, name_am):
 
 
         # =================================================
-        # RULE 6:
+        # RULE 7:
         # if English contains "e"
         # and Amharic doesn't contain "ኧ"
         # =================================================
         if "e" in en_word and "ኧ" not in am_word:
             am_word = am_word.replace("እኽ", "ኧ")
+        
+        # =================================================
+        # RULE 8:
+        # if English contains "he"
+        # and Amharic doesn't contain "ኸ"
+        # =================================================
+        if "he" in en_word and "ኸ" not in am_word:
+            am_word = am_word.replace("ኽ", "ኸ")
+            
             
         return am_word
     # =====================================================
