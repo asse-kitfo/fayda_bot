@@ -1075,6 +1075,15 @@ def fix_amharic_from_english(name_en, name_am):
         if "ima" in en_word and "ኢማ" not in am_word:
             am_word = am_word.replace("አ", "ኢ")
 
+
+        # =================================================
+        # RULE 6:
+        # if English contains "e"
+        # and Amharic doesn't contain "ኧ"
+        # =================================================
+        if "e" in en_word and "ኧ" not in am_word:
+            am_word = am_word.replace("እኽ", "ኧ")
+            
         return am_word
     # =====================================================
     # POSITIONAL ALIGNMENT
